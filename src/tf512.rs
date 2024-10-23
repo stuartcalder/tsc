@@ -28,10 +28,13 @@ macro_rules! store_word {
      {{
         const KEY_SCHEDULE_IDX: usize = ($subkey_num * NUM_KEY_WORDS) + $subkey_idx;
         const KEY_WORD_IDX: usize     = ($subkey_num + $subkey_idx) % NUM_KEY_WORDS_WITH_PARITY;
+        $key_schedule[KEY_SCHEDULE_IDX] = $key_words[KEY_WORD_IDX].wrapping_add($increment);
+        /*
         unsafe {
-        let word: &mut u64 = $key_schedule.get_unchecked_mut(KEY_SCHEDULE_IDX);
-        *word = *$key_words.get_unchecked_mut(KEY_WORD_IDX) + $increment;
+            let word: &mut u64 = $key_schedule.get_unchecked_mut(KEY_SCHEDULE_IDX);
+            *word = *$key_words.get_unchecked_mut(KEY_WORD_IDX) + $increment;
         }
+        */
      }}
 }
 macro_rules! make_subkey {
@@ -45,13 +48,9 @@ macro_rules! make_subkey {
         store_word!($key_schedule, $key_words, $subkey_num, 2usize, 0u64);
         store_word!($key_schedule, $key_words, $subkey_num, 3usize, 0u64);
         store_word!($key_schedule, $key_words, $subkey_num, 4usize, 0u64);
-        let increment: u64 = unsafe {
-            *$tweak_words.get_unchecked_mut($subkey_num % 3)
-        };
+        let increment: u64 = $tweak_words[$subkey_num % 3];
         store_word!($key_schedule, $key_words, $subkey_num, 5usize, increment);
-        let increment: u64 = unsafe {
-            *$tweak_words.get_unchecked_mut(($subkey_num + 1) % 3)
-        };
+        let increment: u64 = $tweak_words[($subkey_num + 1) % 3];
         store_word!($key_schedule, $key_words, $subkey_num, 6usize, increment);
         store_word!($key_schedule, $key_words, $subkey_num, 7usize, $subkey_num as u64);
     }}
@@ -63,13 +62,20 @@ macro_rules! do_mix {
      {{
         const W0: usize = $state_idx * 2;
         const W1: usize = W0 + 1;
-        let w0: mut u64 = unsafe { *$state_words.get_unchecked_mut(W0) };
+        let mut w0: u64 = $state_words[W0];
+        let     w1: u64 = $state_words[W1];
+        w0 = w0.wrapping_add(w1);
+        $state_words[W0] = w0;
+        $state_words[W1] = w1.rotate_left($rot_const) ^ w0;
+        /*
+        let mut w0: u64 = unsafe { *$state_words.get_unchecked_mut(W0) };
         let w1:     u64 = unsafe { *$state_words.get_unchecked_mut(W1) };
         w0 += w1;
         unsafe {
             *$state_words.get_unchecked_mut(W0) = w0;
             *$state_words.get_unchecked_mut(W1) = w1.rotate_left($rot_const) ^ w0;
         }
+        */
      }}
 }
 macro_rules! subkey_idx    { ($round_num:literal) => ($round_num / 4usize) }
@@ -78,39 +84,74 @@ macro_rules! use_subkey_static {
     ($key_schedule_words:expr, $state_words:expr,
      $operation:tt, $round_num:literal) =>
     {{
-        let state : mut u64 = unsafe { *$state_words.get_unchecked_mut(0) };
-        let keysch: mut u64 = unsafe { *$key_schedule.get_unchecked_mut(subkey_offset!($round_num)) };
-        *$state_words.get_unchecked_mut(0) = state $operation keysch;
+        let state:  u64 = $state_words[0];
+        let keysch: u64 = $key_schedule_words[subkey_offset!($round_num)];
+        $state_words[0] = state.wrapping_add(keysch);
+
+        let state:  u64 = $state_words[1];
+        let keysch: u64 = $key_schedule_words[subkey_offset!($round_num) + 1];
+        $state_words[1] = state.wrapping_add(keysch);
+
+        let state:  u64 = $state_words[2];
+        let keysch: u64 = $key_schedule_words[subkey_offset!($round_num) + 2];
+        $state_words[2] = state.wrapping_add(keysch);
+
+        let state:  u64 = $state_words[3];
+        let keysch: u64 = $key_schedule_words[subkey_offset!($round_num) + 3];
+        $state_words[3] = state.wrapping_add(keysch);
+
+        let state:  u64 = $state_words[4];
+        let keysch: u64 = $key_schedule_words[subkey_offset!($round_num) + 4];
+        $state_words[4] = state.wrapping_add(keysch);
+
+        let state:  u64 = $state_words[5];
+        let keysch: u64 = $key_schedule_words[subkey_offset!($round_num) + 5];
+        $state_words[5] = state.wrapping_add(keysch);
+
+        let state:  u64 = $state_words[6];
+        let keysch: u64 = $key_schedule_words[subkey_offset!($round_num) + 6];
+        $state_words[6] = state.wrapping_add(keysch);
+
+        let state:  u64 = $state_words[7];
+        let keysch: u64 = $key_schedule_words[subkey_offset!($round_num) + 7];
+        $state_words[7] = state.wrapping_add(keysch);
+        /*
+        let mut state : u64 = unsafe { *$state_words.get_unchecked_mut(0) };
+        let mut keysch: u64 = unsafe { *$key_schedule_words.get_unchecked_mut(subkey_offset!($round_num)) };
+        unsafe { *$state_words.get_unchecked_mut(0) = state $operation keysch };
 
         state  = unsafe { *$state_words.get_unchecked_mut(1) };
-        keysch = unsafe { *$key_schedule.get_unchecked_mut(subkey_offset!($round_num) + 1) };
-        *$state_words.get_unchecked_mut(1) = state $operation keysch;
+        keysch = unsafe { *$key_schedule_words.get_unchecked_mut(subkey_offset!($round_num) + 1) };
+        unsafe { *$state_words.get_unchecked_mut(1) = state $operation keysch };
 
-        state = unsafe  { *$state_words.get_unchecked_mut(2) };
-        keysch = unsafe { *$key_schedule.get_unchecked_mut(subkey_offset!($round_num) + 2) };
-        *$state_words.get_unchecked_mut(2) = state $operation keysch;
+        state  = unsafe { *$state_words.get_unchecked_mut(2) };
+        keysch = unsafe { *$key_schedule_words.get_unchecked_mut(subkey_offset!($round_num) + 2) };
+        unsafe { *$state_words.get_unchecked_mut(2) = state $operation keysch };
 
-        state = unsafe  { *$state_words.get_unchecked_mut(3) };
-        keysch = unsafe { *$key_schedule.get_unchecked_mut(subkey_offset!($round_num) + 3) };
-        *$state_words.get_unchecked_mut(3) = state $operation keysch;
+        state  = unsafe { *$state_words.get_unchecked_mut(3) };
+        keysch = unsafe { *$key_schedule_words.get_unchecked_mut(subkey_offset!($round_num) + 3) };
+        unsafe { *$state_words.get_unchecked_mut(3) = state $operation keysch };
 
-        state = unsafe  { *$state_words.get_unchecked_mut(4) };
-        keysch = unsafe { *$key_schedule.get_unchecked_mut(subkey_offset!($round_num) + 4) };
-        *$state_words.get_unchecked_mut(4) = state $operation keysch;
+        state  = unsafe { *$state_words.get_unchecked_mut(4) };
+        keysch = unsafe { *$key_schedule_words.get_unchecked_mut(subkey_offset!($round_num) + 4) };
+        unsafe { *$state_words.get_unchecked_mut(4) = state $operation keysch };
 
-        state = unsafe  { *$state_words.get_unchecked_mut(5) };
-        keysch = unsafe { *$key_schedule.get_unchecked_mut(subkey_offset!($round_num) + 5) };
-        *$state_words.get_unchecked_mut(5) = state $operation keysch;
+        state  = unsafe { *$state_words.get_unchecked_mut(5) };
+        keysch = unsafe { *$key_schedule_words.get_unchecked_mut(subkey_offset!($round_num) + 5) };
+        unsafe { *$state_words.get_unchecked_mut(5) = state $operation keysch };
 
-        state = unsafe  { *$state_words.get_unchecked_mut(6) };
-        keysch = unsafe { *$key_schedule.get_unchecked_mut(subkey_offset!($round_num) + 6) };
-        *$state_words.get_unchecked_mut(6) = state $operation keysch;
+        state  = unsafe { *$state_words.get_unchecked_mut(6) };
+        keysch = unsafe { *$key_schedule_words.get_unchecked_mut(subkey_offset!($round_num) + 6) };
+        unsafe { *$state_words.get_unchecked_mut(6) = state $operation keysch };
 
-        state = unsafe  { *$state_words.get_unchecked_mut(7) };
-        keysch = unsafe { *$key_schedule.get_unchecked_mut(subkey_offset!($round_num) + 7) };
-        *$state_words.get_unchecked_mut(7) = state $operation keysch;
+        state  = unsafe { *$state_words.get_unchecked_mut(7) };
+        keysch = unsafe { *$key_schedule_words.get_unchecked_mut(subkey_offset!($round_num) + 7) };
+        unsafe { *$state_words.get_unchecked_mut(7) = state $operation keysch };
+        */
     }}
 }
+//FIXME: Changed use_subkey_static!() to use wrapping_add() for all arithmetic. Rethink how this
+//works.
 macro_rules! add_subkey_static {
     ($key_schedule_words:expr, $state_words:expr, $round_num:literal) =>
     {
@@ -125,8 +166,19 @@ macro_rules! subtract_subkey_static {
 }
 macro_rules! permute {
     ($state_words:expr) =>
-    { unsafe {
-        let w0: mut u64 = *$state_words.get_unchecked_mut(6);
+    { 
+        let mut w0: u64 = $state_words[6];
+        $state_words[6] = $state_words[0];
+        let w1: u64     = $state_words[4];
+        $state_words[4] = w0;
+        w0 = $state_words[2];
+        $state_words[2] = w1;
+        $state_words[0] = w0;
+        w0 = $state_words[3];
+        $state_words[3] = $state_words[7];
+        $state_words[7] = w0;
+    /*unsafe {
+        let mut w0: u64 = *$state_words.get_unchecked_mut(6);
         *$state_words.get_unchecked_mut(6) = *$state_words.get_unchecked_mut(0);
         let w1:     u64 = *$state_words.get_unchecked_mut(4);
         *$state_words.get_unchecked_mut(4) = w0;
@@ -136,7 +188,7 @@ macro_rules! permute {
         w0 = *$state_words.get_unchecked_mut(3);
         *$state_words.get_unchecked_mut(3) = *$state_words.get_unchecked_mut(7);
         *$state_words.get_unchecked_mut(7) = w0;
-    }}
+    } */}
 }
 macro_rules! mix4_permute {
     ($state_words:expr,
@@ -201,52 +253,39 @@ macro_rules! encrypt_static_phase_1 {
     }
 }
 
-pub trait ThreeFish {
+pub trait Threefish512 {
     /// Methods.
-    fn init(
-        self:  &mut Self,
-        key:   &mut [u64],
-        tweak: &mut [u64]
-    );
     fn encipher_1(
-        self: &mut Self,
-        encipher_io: &mut [u8]
+        &mut self,
+        encipher_io: &mut [u64; NUM_BLOCK_WORDS]
     );
     fn encipher_2<'a>(
-        self: &mut Self,
-        ciphertext_output: &'a mut [u8],
-        plaintext_input:   &'a     [u8]
+        &mut self,
+        ciphertext_output: &'a mut [u64; NUM_BLOCK_WORDS],
+        plaintext_input:   &'a     [u64; NUM_BLOCK_WORDS]
     );
 
     /// Procedures.
+    fn new(
+        key:   &mut [u64; NUM_KEY_WORDS_WITH_PARITY],
+        tweak: &mut [u64; NUM_TWEAK_WORDS_WITH_PARITY]
+    ) -> Self;
     fn compute_parity_words(
-        key:   & mut [u64],
-        tweak: & mut [u64]
+        key:   & mut [u64; NUM_KEY_WORDS_WITH_PARITY],
+        tweak: & mut [u64; NUM_TWEAK_WORDS_WITH_PARITY]
     )
     {
-        assert!(key.len()   == NUM_KEY_WORDS_WITH_PARITY);
-        assert!(tweak.len() == NUM_TWEAK_WORDS_WITH_PARITY);
         // Accumulate the xor of all the words together.
-        let key_parity: u64 = unsafe {
-            *key.get_unchecked(0) ^
-            *key.get_unchecked(1) ^
-            *key.get_unchecked(2) ^
-            *key.get_unchecked(3) ^
-            *key.get_unchecked(4) ^
-            *key.get_unchecked(5) ^
-            *key.get_unchecked(6) ^
-            *key.get_unchecked(7)
+        let key_parity: u64 = {
+            key[0] ^ key[1] ^ key[2] ^ key[3] ^
+            key[4] ^ key[5] ^ key[6] ^ key[7] ^
+            CONST_240
         };
         // Accumulate the xor of the two tweak words.
-        let tweak_parity: u64 = unsafe {
-            *tweak.get_unchecked(0) ^
-            *tweak.get_unchecked(1)
-        };
+        let tweak_parity: u64 = tweak[0] ^ tweak[1];
 
-        unsafe {
-            *key.get_unchecked_mut(NUM_KEY_WORDS)     = key_parity;
-            *tweak.get_unchecked_mut(NUM_TWEAK_WORDS) = tweak_parity;
-        }
+        key[NUM_KEY_WORDS]     = key_parity;
+        tweak[NUM_TWEAK_WORDS] = tweak_parity;
     } // ~ compute_parity_words()
 }
 
@@ -282,47 +321,97 @@ pub struct Threefish512Dynamic {
     state:        [u64; NUM_BLOCK_WORDS],
 }
 
-impl ThreeFish for Threefish512Static {
-    fn init<'a>(
-        &mut self,
-        key:   &'a mut [u64],
-        tweak: &'a mut [u64]
-    )
+impl Threefish512 for Threefish512Static {
+    fn new<'a>(
+        key:   &'a mut [u64; NUM_KEY_WORDS_WITH_PARITY],
+        tweak: &'a mut [u64; NUM_TWEAK_WORDS_WITH_PARITY]
+    ) -> Threefish512Static
     {
+        let mut tf = Threefish512Static {
+            key_schedule: [0; NUM_STATIC_KEYSCHEDULE_WORDS],
+            state:        [0; NUM_BLOCK_WORDS]
+        };
         Self::compute_parity_words(key, tweak);
-        make_subkey!(self.key_schedule, key, tweak,  0);
-        make_subkey!(self.key_schedule, key, tweak,  1);
-        make_subkey!(self.key_schedule, key, tweak,  2);
-        make_subkey!(self.key_schedule, key, tweak,  3);
-        make_subkey!(self.key_schedule, key, tweak,  4);
-        make_subkey!(self.key_schedule, key, tweak,  5);
-        make_subkey!(self.key_schedule, key, tweak,  6);
-        make_subkey!(self.key_schedule, key, tweak,  7);
-        make_subkey!(self.key_schedule, key, tweak,  8);
-        make_subkey!(self.key_schedule, key, tweak,  9);
-        make_subkey!(self.key_schedule, key, tweak, 10);
-        make_subkey!(self.key_schedule, key, tweak, 11);
-        make_subkey!(self.key_schedule, key, tweak, 12);
-        make_subkey!(self.key_schedule, key, tweak, 13);
-        make_subkey!(self.key_schedule, key, tweak, 14);
-        make_subkey!(self.key_schedule, key, tweak, 15);
-        make_subkey!(self.key_schedule, key, tweak, 16);
-        make_subkey!(self.key_schedule, key, tweak, 17);
-        make_subkey!(self.key_schedule, key, tweak, 18);
+        make_subkey!(tf.key_schedule, key, tweak,  0);
+        make_subkey!(tf.key_schedule, key, tweak,  1);
+        make_subkey!(tf.key_schedule, key, tweak,  2);
+        make_subkey!(tf.key_schedule, key, tweak,  3);
+        make_subkey!(tf.key_schedule, key, tweak,  4);
+        make_subkey!(tf.key_schedule, key, tweak,  5);
+        make_subkey!(tf.key_schedule, key, tweak,  6);
+        make_subkey!(tf.key_schedule, key, tweak,  7);
+        make_subkey!(tf.key_schedule, key, tweak,  8);
+        make_subkey!(tf.key_schedule, key, tweak,  9);
+        make_subkey!(tf.key_schedule, key, tweak, 10);
+        make_subkey!(tf.key_schedule, key, tweak, 11);
+        make_subkey!(tf.key_schedule, key, tweak, 12);
+        make_subkey!(tf.key_schedule, key, tweak, 13);
+        make_subkey!(tf.key_schedule, key, tweak, 14);
+        make_subkey!(tf.key_schedule, key, tweak, 15);
+        make_subkey!(tf.key_schedule, key, tweak, 16);
+        make_subkey!(tf.key_schedule, key, tweak, 17);
+        make_subkey!(tf.key_schedule, key, tweak, 18);
+
+        tf
     }
     fn encipher_1(
-        self: &mut Self,
-        encipher_io: &mut [u8]
+        &mut self,
+        encipher_io: &mut [u64; NUM_BLOCK_WORDS]
     )
     {
-        //TODO
+        self.state.copy_from_slice(encipher_io);
+
+        encrypt_static_phase_0!(self.key_schedule, self.state,  0);
+        encrypt_static_phase_1!(self.key_schedule, self.state,  4);
+        encrypt_static_phase_0!(self.key_schedule, self.state,  8);
+        encrypt_static_phase_1!(self.key_schedule, self.state, 12);
+        encrypt_static_phase_0!(self.key_schedule, self.state, 16);
+        encrypt_static_phase_1!(self.key_schedule, self.state, 20);
+        encrypt_static_phase_0!(self.key_schedule, self.state, 24);
+        encrypt_static_phase_1!(self.key_schedule, self.state, 28);
+        encrypt_static_phase_0!(self.key_schedule, self.state, 32);
+        encrypt_static_phase_1!(self.key_schedule, self.state, 36);
+        encrypt_static_phase_0!(self.key_schedule, self.state, 40);
+        encrypt_static_phase_1!(self.key_schedule, self.state, 44);
+        encrypt_static_phase_0!(self.key_schedule, self.state, 48);
+        encrypt_static_phase_1!(self.key_schedule, self.state, 52);
+        encrypt_static_phase_0!(self.key_schedule, self.state, 56);
+        encrypt_static_phase_1!(self.key_schedule, self.state, 60);
+        encrypt_static_phase_0!(self.key_schedule, self.state, 64);
+        encrypt_static_phase_1!(self.key_schedule, self.state, 68);
+        add_subkey_static!(self.key_schedule, self.state, 72);
+
+        encipher_io.copy_from_slice(&self.state);
     }
     fn encipher_2<'a>(
         self: &mut Self,
-        ciphertext_output: &'a mut [u8],
-        plaintext_input:   &'a     [u8]
+        ciphertext_output: &'a mut [u64; NUM_BLOCK_WORDS],
+        plaintext_input:   &'a     [u64; NUM_BLOCK_WORDS]
     )
     {
         assert!(ciphertext_output.len() == plaintext_input.len() && ciphertext_output.len() == self.state.len());
+        self.state.copy_from_slice(plaintext_input);
+
+        encrypt_static_phase_0!(self.key_schedule, self.state,  0);
+        encrypt_static_phase_1!(self.key_schedule, self.state,  4);
+        encrypt_static_phase_0!(self.key_schedule, self.state,  8);
+        encrypt_static_phase_1!(self.key_schedule, self.state, 12);
+        encrypt_static_phase_0!(self.key_schedule, self.state, 16);
+        encrypt_static_phase_1!(self.key_schedule, self.state, 20);
+        encrypt_static_phase_0!(self.key_schedule, self.state, 24);
+        encrypt_static_phase_1!(self.key_schedule, self.state, 28);
+        encrypt_static_phase_0!(self.key_schedule, self.state, 32);
+        encrypt_static_phase_1!(self.key_schedule, self.state, 36);
+        encrypt_static_phase_0!(self.key_schedule, self.state, 40);
+        encrypt_static_phase_1!(self.key_schedule, self.state, 44);
+        encrypt_static_phase_0!(self.key_schedule, self.state, 48);
+        encrypt_static_phase_1!(self.key_schedule, self.state, 52);
+        encrypt_static_phase_0!(self.key_schedule, self.state, 56);
+        encrypt_static_phase_1!(self.key_schedule, self.state, 60);
+        encrypt_static_phase_0!(self.key_schedule, self.state, 64);
+        encrypt_static_phase_1!(self.key_schedule, self.state, 68);
+        add_subkey_static!(self.key_schedule, self.state, 72);
+
+        ciphertext_output.copy_from_slice(&self.state);
     }
 }
