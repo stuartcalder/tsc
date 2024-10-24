@@ -1,19 +1,17 @@
 use tsc::tf512::*;
 
 fn main() {
-    let mut key: [u64; NUM_KEY_WORDS_WITH_PARITY] = [
+    let key: [u64; NUM_KEY_WORDS_WITH_PARITY] = [
         0; NUM_KEY_WORDS_WITH_PARITY
     ];
-    let mut twk: [u64; NUM_TWEAK_WORDS_WITH_PARITY] = [
+    let twk: [u64; NUM_TWEAK_WORDS_WITH_PARITY] = [
         0; NUM_TWEAK_WORDS_WITH_PARITY
     ];
     let mut blk: [u64; NUM_BLOCK_WORDS] = [
         0; NUM_BLOCK_WORDS
     ];
 
-
     println!("Before enciphering: {:?}", blk);
-
 
     {
         let mut tf512_static = Threefish512Static::new(key.clone(), twk.clone());
@@ -24,6 +22,7 @@ fn main() {
                 std::mem::size_of::<u64>() * NUM_BLOCK_WORDS
             )
         };
+
         println!("After enciphering: {:x?}", r);
     }
 }

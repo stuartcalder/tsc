@@ -16,7 +16,13 @@ pub const NUM_SUBKEYS: usize = 19;
 pub const NUM_KEY_WORDS_WITH_PARITY: usize = 9;
 pub const NUM_TWEAK_WORDS_WITH_PARITY: usize = 3;
 
-pub const CONST_240: u64 = 0x1bd11bdaa9fc1a22;
+/**
+ * CONST_240 is the constant provided by the Threefish512 specification that is to be
+ * bitwise XOR'd with the 8 u64 words of the input key.
+ * Instead of swapping the endianness of all those u64's and XORing with COST_240,
+ * swap the bytes of CONST_240 itself when the target is big endian.
+ */
+pub const CONST_240: u64 = u64::from_le(0x1bd11bdaa9fc1a22);
 pub const NUM_CTR_IV_BYTES: usize = 32;
 
 macro_rules! store_word {
@@ -28,7 +34,7 @@ macro_rules! store_word {
      {{
         const KEY_SCHEDULE_IDX: usize = ($subkey_num * NUM_KEY_WORDS) + $subkey_idx;
         const KEY_WORD_IDX: usize     = ($subkey_num + $subkey_idx) % NUM_KEY_WORDS_WITH_PARITY;
-        $key_schedule[KEY_SCHEDULE_IDX] = $key_words[KEY_WORD_IDX].wrapping_add($increment);
+        $key_schedule[KEY_SCHEDULE_IDX] = u64::from_le($key_words[KEY_WORD_IDX]).wrapping_add($increment).to_le();
      }}
 }
 macro_rules! make_subkey {
@@ -56,50 +62,52 @@ macro_rules! do_mix {
      {{
         const W0: usize = $state_idx * 2;
         const W1: usize = W0 + 1;
-        let mut w0: u64 = $state_words[W0];
-        let     w1: u64 = $state_words[W1];
+        let mut w0: u64 = u64::from_le($state_words[W0]);
+        let     w1: u64 = u64::from_le($state_words[W1]);
         w0 = w0.wrapping_add(w1);
-        $state_words[W0] = w0;
-        $state_words[W1] = w1.rotate_left($rot_const) ^ w0;
+        $state_words[W0] = w0.to_le();
+        $state_words[W1] = (w1.rotate_left($rot_const) ^ w0).to_le();
      }}
 }
 macro_rules! subkey_idx    { ($round_num:literal) => ($round_num / 4usize) }
 macro_rules! subkey_offset { ($round_num:literal) => (subkey_idx!($round_num) * NUM_BLOCK_WORDS) }
 macro_rules! use_subkey_static {
-    ($key_schedule_words:expr, $state_words:expr,
-     $operation:tt, $round_num:literal) =>
+    ($key_schedule_words:expr,
+     $state_words:expr,
+     $operation:tt,
+     $round_num:literal) =>
     {{
-        let state:  u64 = $state_words[0];
-        let keysch: u64 = $key_schedule_words[subkey_offset!($round_num)];
-        $state_words[0] = state.wrapping_add(keysch);
+        let state:  u64 = u64::from_le($state_words[0]);
+        let keysch: u64 = u64::from_le($key_schedule_words[subkey_offset!($round_num)]);
+        $state_words[0] = state.wrapping_add(keysch).to_le();
 
-        let state:  u64 = $state_words[1];
-        let keysch: u64 = $key_schedule_words[subkey_offset!($round_num) + 1];
-        $state_words[1] = state.wrapping_add(keysch);
+        let state:  u64 = u64::from_le($state_words[1]);
+        let keysch: u64 = u64::from_le($key_schedule_words[subkey_offset!($round_num) + 1]);
+        $state_words[1] = state.wrapping_add(keysch).to_le();
 
-        let state:  u64 = $state_words[2];
-        let keysch: u64 = $key_schedule_words[subkey_offset!($round_num) + 2];
-        $state_words[2] = state.wrapping_add(keysch);
+        let state:  u64 = u64::from_le($state_words[2]);
+        let keysch: u64 = u64::from_le($key_schedule_words[subkey_offset!($round_num) + 2]);
+        $state_words[2] = state.wrapping_add(keysch).to_le();
 
-        let state:  u64 = $state_words[3];
-        let keysch: u64 = $key_schedule_words[subkey_offset!($round_num) + 3];
-        $state_words[3] = state.wrapping_add(keysch);
+        let state:  u64 = u64::from_le($state_words[3]);
+        let keysch: u64 = u64::from_le($key_schedule_words[subkey_offset!($round_num) + 3]);
+        $state_words[3] = state.wrapping_add(keysch).to_le();
 
-        let state:  u64 = $state_words[4];
-        let keysch: u64 = $key_schedule_words[subkey_offset!($round_num) + 4];
-        $state_words[4] = state.wrapping_add(keysch);
+        let state:  u64 = u64::from_le($state_words[4]);
+        let keysch: u64 = u64::from_le($key_schedule_words[subkey_offset!($round_num) + 4]);
+        $state_words[4] = state.wrapping_add(keysch).to_le();
 
-        let state:  u64 = $state_words[5];
-        let keysch: u64 = $key_schedule_words[subkey_offset!($round_num) + 5];
-        $state_words[5] = state.wrapping_add(keysch);
+        let state:  u64 = u64::from_le($state_words[5]);
+        let keysch: u64 = u64::from_le($key_schedule_words[subkey_offset!($round_num) + 5]);
+        $state_words[5] = state.wrapping_add(keysch).to_le();
 
-        let state:  u64 = $state_words[6];
-        let keysch: u64 = $key_schedule_words[subkey_offset!($round_num) + 6];
-        $state_words[6] = state.wrapping_add(keysch);
+        let state:  u64 = u64::from_le($state_words[6]);
+        let keysch: u64 = u64::from_le($key_schedule_words[subkey_offset!($round_num) + 6]);
+        $state_words[6] = state.wrapping_add(keysch).to_le();
 
-        let state:  u64 = $state_words[7];
-        let keysch: u64 = $key_schedule_words[subkey_offset!($round_num) + 7];
-        $state_words[7] = state.wrapping_add(keysch);
+        let state:  u64 = u64::from_le($state_words[7]);
+        let keysch: u64 = u64::from_le($key_schedule_words[subkey_offset!($round_num) + 7]);
+        $state_words[7] = state.wrapping_add(keysch).to_le();
     }}
 }
 //FIXME: Changed use_subkey_static!() to use wrapping_add() for all arithmetic. Rethink how this
@@ -124,39 +132,39 @@ macro_rules! add_subkey_dynamic {
     {{
         const SUBKEY_IDX: usize = subkey_idx!($round_num);
 
-        let s: u64 = $state_words[0];
-        let k: u64 = $key_words[SUBKEY_IDX % NUM_KEY_WORDS_WITH_PARITY];
-        $state_words[0] = s.wrapping_add(k);
+        let s: u64 = u64::from_le($state_words[0]);
+        let k: u64 = u64::from_le($key_words[SUBKEY_IDX % NUM_KEY_WORDS_WITH_PARITY]);
+        $state_words[0] = s.wrapping_add(k).to_le();
 
-        let s: u64 = $state_words[1];
-        let k: u64 = $key_words[(SUBKEY_IDX + 1) % NUM_KEY_WORDS_WITH_PARITY];
-        $state_words[1] = s.wrapping_add(k);
+        let s: u64 = u64::from_le($state_words[1]);
+        let k: u64 = u64::from_le($key_words[(SUBKEY_IDX + 1) % NUM_KEY_WORDS_WITH_PARITY]);
+        $state_words[1] = s.wrapping_add(k).to_le();
 
-        let s: u64 = $state_words[2];
-        let k: u64 = $key_words[(SUBKEY_IDX + 2) % NUM_KEY_WORDS_WITH_PARITY];
-        $state_words[2] = s.wrapping_add(k);
+        let s: u64 = u64::from_le($state_words[2]);
+        let k: u64 = u64::from_le($key_words[(SUBKEY_IDX + 2) % NUM_KEY_WORDS_WITH_PARITY]);
+        $state_words[2] = s.wrapping_add(k).to_le();
 
-        let s: u64 = $state_words[3];
-        let k: u64 = $key_words[(SUBKEY_IDX + 3) % NUM_KEY_WORDS_WITH_PARITY];
-        $state_words[3] = s.wrapping_add(k);
+        let s: u64 = u64::from_le($state_words[3]);
+        let k: u64 = u64::from_le($key_words[(SUBKEY_IDX + 3) % NUM_KEY_WORDS_WITH_PARITY]);
+        $state_words[3] = s.wrapping_add(k).to_le();
 
-        let s: u64 = $state_words[4];
-        let k: u64 = $key_words[(SUBKEY_IDX + 4) % NUM_KEY_WORDS_WITH_PARITY];
-        $state_words[4] = s.wrapping_add(k);
+        let s: u64 = u64::from_le($state_words[4]);
+        let k: u64 = u64::from_le($key_words[(SUBKEY_IDX + 4) % NUM_KEY_WORDS_WITH_PARITY]);
+        $state_words[4] = s.wrapping_add(k).to_le();
 
-        let s: u64 = $state_words[5];
-        let k: u64 = $key_words[(SUBKEY_IDX + 5) % NUM_KEY_WORDS_WITH_PARITY];
-        let t: u64 = $tweak_words[SUBKEY_IDX % 3];
-        $state_words[5] = s.wrapping_add(k.wrapping_add(t));
+        let s: u64 = u64::from_le($state_words[5]);
+        let k: u64 = u64::from_le($key_words[(SUBKEY_IDX + 5) % NUM_KEY_WORDS_WITH_PARITY]);
+        let t: u64 = u64::from_le($tweak_words[SUBKEY_IDX % 3]);
+        $state_words[5] = s.wrapping_add(k.wrapping_add(t)).to_le();
 
-        let s: u64 = $state_words[6];
-        let k: u64 = $key_words[(SUBKEY_IDX + 6) % NUM_KEY_WORDS_WITH_PARITY];
-        let t: u64 = $tweak_words[(SUBKEY_IDX + 1) % 3];
-        $state_words[6] = s.wrapping_add(k.wwrapping_add(t));
+        let s: u64 = u64::from_le($state_words[6]);
+        let k: u64 = u64::from_le($key_words[(SUBKEY_IDX + 6) % NUM_KEY_WORDS_WITH_PARITY]);
+        let t: u64 = u64::from_le($tweak_words[(SUBKEY_IDX + 1) % 3]);
+        $state_words[6] = s.wrapping_add(k.wrapping_add(t)).to_le();
 
-        let s: u64 = $state_words[7];
-        let k: u64 = $key_words[(SUBKEY_IDX + 7) % NUM_KEY_WORDS_WITH_PARITY];
-        $state_words[7] = s.wrapping_add(k.wrapping_add(SUBKEY_IDX));
+        let s: u64 = u64::from_le($state_words[7]);
+        let k: u64 = u64::from_le($key_words[(SUBKEY_IDX + 7) % NUM_KEY_WORDS_WITH_PARITY]);
+        $state_words[7] = s.wrapping_add(k.wrapping_add(SUBKEY_IDX)).to_le();
     }}
 }
 macro_rules! permute {
@@ -312,7 +320,7 @@ pub trait Threefish512 {
         tweak: & mut [u64; NUM_TWEAK_WORDS_WITH_PARITY]
     )
     {
-        // Accumulate the xor of all the words together.
+        // Accumulate the xor of all the key words together.
         let key_parity: u64 = {
             key[0] ^ key[1] ^ key[2] ^ key[3] ^
             key[4] ^ key[5] ^ key[6] ^ key[7] ^
@@ -452,15 +460,3 @@ impl Threefish512 for Threefish512Static {
         ciphertext_output.copy_from_slice(&self.state);
     }
 }
-/*
-impl Threefish512 for Threefish512Dynamic {
-    fn new(
-        key:   &mut [u64; NUM_KEY_WORDS_WITH_PARITY],
-        tweak: &mut [u64; NUM_TWEAK_WORDS_WITH_PARITY]
-    ) -> Self
-    {
-        let mut tf = Threefish512Dynamic {
-        };
-    }
-}
-*/
