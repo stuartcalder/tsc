@@ -9,9 +9,74 @@ pub mod tf512;
 mod tests {
     use super::*;
 
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
+    const fn swap_all<const N: usize>(arr: & [u64; N]) -> [u64; N]
+    {
+        let mut a: [u64; N] = [0; N];
+        let mut i = 0usize;
+        loop {
+            if i == N {
+                break;
+            }
+            a[i] = arr[i].swap_bytes();
+            i += 1;
+        }
+
+        a
     }
+
+    /**
+     * Compare Threefish512Static with Threefish512Dynamic, and ensure that they produce the same
+     * ciphertext outputs for the same input (key, tweak, input_block) tuples.
+     */
+    #[test]
+    fn compare_threefish_impls() {
+        use super::tf512::*;
+        type Key   = [u64; NUM_KEY_WORDS_WITH_PARITY];
+        type Tweak = [u64; NUM_TWEAK_WORDS_WITH_PARITY];
+        type Block = [u64; NUM_BLOCK_WORDS];
+        type Tpl   = (Key, Tweak, Block);
+
+        const NULL_KEY:   Key   = [0; NUM_KEY_WORDS_WITH_PARITY];
+        const NULL_TWEAK: Tweak = [0; NUM_TWEAK_WORDS_WITH_PARITY];
+        const NULL_BLOCK: Block = [0; NUM_BLOCK_WORDS];
+        const NULL_TPL:   Tpl   = (NULL_KEY, NULL_TWEAK, NULL_BLOCK);
+
+        const TEST_KEY_0: Key = {
+            let mut k: Key = NULL_KEY;
+            k[k.len() - 1] = 1u64;
+            k
+        };
+        const TEST_TWEAK_0: Tweak = {
+            let mut t: Tweak = NULL_TWEAK;
+            t[0] = 1u64;
+            t
+        };
+        const TEST_BLK_0: Block = {
+            let mut b: Block = NULL_BLOCK;
+            b[2] = 1u64;
+            b
+        };
+        const TEST_TPL_0: Tpl = (TEST_KEY_0, TEST_TWEAK_0, TEST_BLK_0);
+        const TEST_TPL_1: Tpl = (
+            swap_all(&TEST_KEY_0),
+            swap_all(&TEST_TWEAK_0),
+            swap_all(&TEST_BLK_0)
+        );
+
+        let mut tpl: [Tpl; 2] = [TEST_TPL_0, TEST_TPL_1];
+
+        for t in &mut tpl {
+            {
+                let mut tf512s = Threefish512Static::new(&mut t.0, &mut t.1);
+                let mut s_out  = NULL_BLOCK;
+                tf512s.encipher_2(&mut s_out, &t.2);
+
+                let mut tf512d = Threefish512Dynamic::new(&mut t.0, &mut t.1);
+                let mut d_out  = NULL_BLOCK;
+                tf512d.encipher_2(&mut d_out, &t.2);
+
+                assert_eq!(s_out, d_out);
+            }
+        }
+    } // ~ compare_threefish_impls()
 }

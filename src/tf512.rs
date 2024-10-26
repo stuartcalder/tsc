@@ -1,29 +1,29 @@
-
-pub const NUM_BLOCK_BITS: usize = 512;
+pub const NUM_BLOCK_BITS: usize  = 512;
 pub const NUM_BLOCK_BYTES: usize = 64;
 pub const NUM_BLOCK_WORDS: usize = 8;
 
-pub const NUM_KEY_BITS: usize = NUM_BLOCK_BITS;
+pub const NUM_KEY_BITS: usize  = NUM_BLOCK_BITS;
 pub const NUM_KEY_BYTES: usize = NUM_BLOCK_BYTES;
 pub const NUM_KEY_WORDS: usize = NUM_BLOCK_WORDS;
 
-pub const NUM_TWEAK_BITS: usize = 128;
+pub const NUM_TWEAK_BITS: usize  = 128;
 pub const NUM_TWEAK_BYTES: usize = 16;
 pub const NUM_TWEAK_WORDS: usize = 2;
 
-pub const NUM_ROUNDS: usize = 72;
+pub const NUM_ROUNDS: usize  = 72;
 pub const NUM_SUBKEYS: usize = 19;
-pub const NUM_KEY_WORDS_WITH_PARITY: usize = 9;
-pub const NUM_TWEAK_WORDS_WITH_PARITY: usize = 3;
+pub const NUM_KEY_WORDS_WITH_PARITY: usize   = NUM_KEY_WORDS   + 1;
+pub const NUM_TWEAK_WORDS_WITH_PARITY: usize = NUM_TWEAK_WORDS + 1;
 
 /**
  * CONST_240 is the constant provided by the Threefish512 specification that is to be
  * bitwise XOR'd with the 8 u64 words of the input key.
- * Instead of swapping the endianness of all those u64's and XORing with COST_240,
+ * Instead of swapping the endianness of all those u64's and XORing with CONST_240,
  * swap the bytes of CONST_240 itself when the target is big endian.
  */
 pub const CONST_240: u64 = u64::from_le(0x1bd11bdaa9fc1a22);
 pub const NUM_CTR_IV_BYTES: usize = 32;
+pub const NUM_CTR_IV_WORDS: usize = 4;
 
 macro_rules! store_word {
     ($key_schedule:expr,
@@ -164,7 +164,7 @@ macro_rules! add_subkey_dynamic {
 
         let s: u64 = u64::from_le($state_words[7]);
         let k: u64 = u64::from_le($key_words[(SUBKEY_IDX + 7) % NUM_KEY_WORDS_WITH_PARITY]);
-        $state_words[7] = s.wrapping_add(k.wrapping_add(SUBKEY_IDX)).to_le();
+        $state_words[7] = s.wrapping_add(k.wrapping_add(SUBKEY_IDX as u64)).to_le();
     }}
 }
 macro_rules! permute {
@@ -311,33 +311,42 @@ pub trait Threefish512 {
     );
 
     /// Procedures.
-    fn new(
-        key:   [u64; NUM_KEY_WORDS_WITH_PARITY],
-        tweak: [u64; NUM_TWEAK_WORDS_WITH_PARITY]
-    ) -> Self;
     fn compute_parity_words(
-        key:   & mut [u64; NUM_KEY_WORDS_WITH_PARITY],
-        tweak: & mut [u64; NUM_TWEAK_WORDS_WITH_PARITY]
+        key:   &mut [u64],
+        tweak: &mut [u64]
     )
     {
+        debug_assert!(key.len()   >= NUM_KEY_WORDS_WITH_PARITY);
+        debug_assert!(tweak.len() >= NUM_TWEAK_WORDS_WITH_PARITY);
         // Accumulate the xor of all the key words together.
-        let key_parity: u64 = {
-            key[0] ^ key[1] ^ key[2] ^ key[3] ^
-            key[4] ^ key[5] ^ key[6] ^ key[7] ^
+        let key_parity: u64 = unsafe {
+            *key.get_unchecked_mut(0) ^
+            *key.get_unchecked_mut(1) ^
+            *key.get_unchecked_mut(2) ^
+            *key.get_unchecked_mut(3) ^
+            *key.get_unchecked_mut(4) ^
+            *key.get_unchecked_mut(5) ^
+            *key.get_unchecked_mut(6) ^
+            *key.get_unchecked_mut(7) ^
             CONST_240
         };
         // Accumulate the xor of the two tweak words.
-        let tweak_parity: u64 = tweak[0] ^ tweak[1];
+        let tweak_parity: u64 = unsafe {
+            *tweak.get_unchecked_mut(0) ^ *tweak.get_unchecked_mut(1)
+        };
 
-        key[NUM_KEY_WORDS]     = key_parity;
-        tweak[NUM_TWEAK_WORDS] = tweak_parity;
+        unsafe {
+            *key.get_unchecked_mut(NUM_KEY_WORDS)     = key_parity;
+            *tweak.get_unchecked_mut(NUM_TWEAK_WORDS) = tweak_parity;
+        }
+
     } // ~ compute_parity_words()
 }
 
 pub trait StreamCipher {
     fn init(
         self: &mut Self,
-        initialization_vector: &[u8]
+        initialization_vector: & [u8]
     );
     fn xor_1(
         self: &mut Self,
@@ -348,7 +357,7 @@ pub trait StreamCipher {
     fn xor_2(
         self: &mut Self,
         xor_output: &mut [u8],
-        xor_input:  &    [u8],
+        xor_input:     & [u8],
         xor_count:       u64,
         keystream_index: u64
     );
@@ -367,16 +376,79 @@ pub struct Threefish512Dynamic {
 }
 
 impl Threefish512 for Threefish512Static {
-    fn new(
-        mut key:   [u64; NUM_KEY_WORDS_WITH_PARITY],
-        mut tweak: [u64; NUM_TWEAK_WORDS_WITH_PARITY]
+    fn encipher_1(
+        &mut self,
+        encipher_io: &mut [u64; NUM_BLOCK_WORDS]
+    )
+    {
+        self.state = *encipher_io;
+
+        encrypt_static_phase_0!(self.key_schedule, self.state,  0);
+        encrypt_static_phase_1!(self.key_schedule, self.state,  4);
+        encrypt_static_phase_0!(self.key_schedule, self.state,  8);
+        encrypt_static_phase_1!(self.key_schedule, self.state, 12);
+        encrypt_static_phase_0!(self.key_schedule, self.state, 16);
+        encrypt_static_phase_1!(self.key_schedule, self.state, 20);
+        encrypt_static_phase_0!(self.key_schedule, self.state, 24);
+        encrypt_static_phase_1!(self.key_schedule, self.state, 28);
+        encrypt_static_phase_0!(self.key_schedule, self.state, 32);
+        encrypt_static_phase_1!(self.key_schedule, self.state, 36);
+        encrypt_static_phase_0!(self.key_schedule, self.state, 40);
+        encrypt_static_phase_1!(self.key_schedule, self.state, 44);
+        encrypt_static_phase_0!(self.key_schedule, self.state, 48);
+        encrypt_static_phase_1!(self.key_schedule, self.state, 52);
+        encrypt_static_phase_0!(self.key_schedule, self.state, 56);
+        encrypt_static_phase_1!(self.key_schedule, self.state, 60);
+        encrypt_static_phase_0!(self.key_schedule, self.state, 64);
+        encrypt_static_phase_1!(self.key_schedule, self.state, 68);
+        add_subkey_static!(self.key_schedule, self.state, 72);
+
+        *encipher_io = self.state;
+    }
+    fn encipher_2<'a>(
+        self: &mut Self,
+        ciphertext_output: &'a mut [u64; NUM_BLOCK_WORDS],
+        plaintext_input:   &'a     [u64; NUM_BLOCK_WORDS]
+    )
+    {
+        self.state = *plaintext_input;
+
+        encrypt_static_phase_0!(self.key_schedule, self.state,  0);
+        encrypt_static_phase_1!(self.key_schedule, self.state,  4);
+        encrypt_static_phase_0!(self.key_schedule, self.state,  8);
+        encrypt_static_phase_1!(self.key_schedule, self.state, 12);
+        encrypt_static_phase_0!(self.key_schedule, self.state, 16);
+        encrypt_static_phase_1!(self.key_schedule, self.state, 20);
+        encrypt_static_phase_0!(self.key_schedule, self.state, 24);
+        encrypt_static_phase_1!(self.key_schedule, self.state, 28);
+        encrypt_static_phase_0!(self.key_schedule, self.state, 32);
+        encrypt_static_phase_1!(self.key_schedule, self.state, 36);
+        encrypt_static_phase_0!(self.key_schedule, self.state, 40);
+        encrypt_static_phase_1!(self.key_schedule, self.state, 44);
+        encrypt_static_phase_0!(self.key_schedule, self.state, 48);
+        encrypt_static_phase_1!(self.key_schedule, self.state, 52);
+        encrypt_static_phase_0!(self.key_schedule, self.state, 56);
+        encrypt_static_phase_1!(self.key_schedule, self.state, 60);
+        encrypt_static_phase_0!(self.key_schedule, self.state, 64);
+        encrypt_static_phase_1!(self.key_schedule, self.state, 68);
+        add_subkey_static!(self.key_schedule, self.state, 72);
+
+        *ciphertext_output = self.state;
+    }
+}
+impl Threefish512Static {
+    pub fn new(
+        key:   &mut [u64],
+        tweak: &mut [u64]
     ) -> Self
     {
+        debug_assert!(key.len()   == NUM_KEY_WORDS_WITH_PARITY);
+        debug_assert!(tweak.len() == NUM_TWEAK_WORDS_WITH_PARITY);
         let mut tf = Threefish512Static {
             key_schedule: [0; NUM_STATIC_KEYSCHEDULE_WORDS],
             state:        [0; NUM_BLOCK_WORDS]
         };
-        Self::compute_parity_words(&mut key, &mut tweak);
+        Self::compute_parity_words(key, tweak);
         make_subkey!(tf.key_schedule, key, tweak,  0);
         make_subkey!(tf.key_schedule, key, tweak,  1);
         make_subkey!(tf.key_schedule, key, tweak,  2);
@@ -399,34 +471,35 @@ impl Threefish512 for Threefish512Static {
 
         tf
     }
+}
+
+impl Threefish512 for Threefish512Dynamic {
     fn encipher_1(
         &mut self,
         encipher_io: &mut [u64; NUM_BLOCK_WORDS]
     )
     {
-        self.state.copy_from_slice(encipher_io);
-
-        encrypt_static_phase_0!(self.key_schedule, self.state,  0);
-        encrypt_static_phase_1!(self.key_schedule, self.state,  4);
-        encrypt_static_phase_0!(self.key_schedule, self.state,  8);
-        encrypt_static_phase_1!(self.key_schedule, self.state, 12);
-        encrypt_static_phase_0!(self.key_schedule, self.state, 16);
-        encrypt_static_phase_1!(self.key_schedule, self.state, 20);
-        encrypt_static_phase_0!(self.key_schedule, self.state, 24);
-        encrypt_static_phase_1!(self.key_schedule, self.state, 28);
-        encrypt_static_phase_0!(self.key_schedule, self.state, 32);
-        encrypt_static_phase_1!(self.key_schedule, self.state, 36);
-        encrypt_static_phase_0!(self.key_schedule, self.state, 40);
-        encrypt_static_phase_1!(self.key_schedule, self.state, 44);
-        encrypt_static_phase_0!(self.key_schedule, self.state, 48);
-        encrypt_static_phase_1!(self.key_schedule, self.state, 52);
-        encrypt_static_phase_0!(self.key_schedule, self.state, 56);
-        encrypt_static_phase_1!(self.key_schedule, self.state, 60);
-        encrypt_static_phase_0!(self.key_schedule, self.state, 64);
-        encrypt_static_phase_1!(self.key_schedule, self.state, 68);
-        add_subkey_static!(self.key_schedule, self.state, 72);
-
-        encipher_io.copy_from_slice(&self.state);
+        self.state = *encipher_io;
+        encrypt_dynamic_phase_0!(self.parity_key, self.state, self.parity_tweak,  0);
+        encrypt_dynamic_phase_1!(self.parity_key, self.state, self.parity_tweak,  4);
+        encrypt_dynamic_phase_0!(self.parity_key, self.state, self.parity_tweak,  8);
+        encrypt_dynamic_phase_1!(self.parity_key, self.state, self.parity_tweak, 12);
+        encrypt_dynamic_phase_0!(self.parity_key, self.state, self.parity_tweak, 16);
+        encrypt_dynamic_phase_1!(self.parity_key, self.state, self.parity_tweak, 20);
+        encrypt_dynamic_phase_0!(self.parity_key, self.state, self.parity_tweak, 24);
+        encrypt_dynamic_phase_1!(self.parity_key, self.state, self.parity_tweak, 28);
+        encrypt_dynamic_phase_0!(self.parity_key, self.state, self.parity_tweak, 32);
+        encrypt_dynamic_phase_1!(self.parity_key, self.state, self.parity_tweak, 36);
+        encrypt_dynamic_phase_0!(self.parity_key, self.state, self.parity_tweak, 40);
+        encrypt_dynamic_phase_1!(self.parity_key, self.state, self.parity_tweak, 44);
+        encrypt_dynamic_phase_0!(self.parity_key, self.state, self.parity_tweak, 48);
+        encrypt_dynamic_phase_1!(self.parity_key, self.state, self.parity_tweak, 52);
+        encrypt_dynamic_phase_0!(self.parity_key, self.state, self.parity_tweak, 56);
+        encrypt_dynamic_phase_1!(self.parity_key, self.state, self.parity_tweak, 60);
+        encrypt_dynamic_phase_0!(self.parity_key, self.state, self.parity_tweak, 64);
+        encrypt_dynamic_phase_1!(self.parity_key, self.state, self.parity_tweak, 68);
+        add_subkey_dynamic!(self.parity_key, self.state, self.parity_tweak, 72);
+        *encipher_io = self.state;
     }
     fn encipher_2<'a>(
         self: &mut Self,
@@ -434,29 +507,54 @@ impl Threefish512 for Threefish512Static {
         plaintext_input:   &'a     [u64; NUM_BLOCK_WORDS]
     )
     {
-        assert!(ciphertext_output.len() == plaintext_input.len() && ciphertext_output.len() == self.state.len());
-        self.state.copy_from_slice(plaintext_input);
+        self.state = *plaintext_input;
+        encrypt_dynamic_phase_0!(self.parity_key, self.state, self.parity_tweak,  0);
+        encrypt_dynamic_phase_1!(self.parity_key, self.state, self.parity_tweak,  4);
+        encrypt_dynamic_phase_0!(self.parity_key, self.state, self.parity_tweak,  8);
+        encrypt_dynamic_phase_1!(self.parity_key, self.state, self.parity_tweak, 12);
+        encrypt_dynamic_phase_0!(self.parity_key, self.state, self.parity_tweak, 16);
+        encrypt_dynamic_phase_1!(self.parity_key, self.state, self.parity_tweak, 20);
+        encrypt_dynamic_phase_0!(self.parity_key, self.state, self.parity_tweak, 24);
+        encrypt_dynamic_phase_1!(self.parity_key, self.state, self.parity_tweak, 28);
+        encrypt_dynamic_phase_0!(self.parity_key, self.state, self.parity_tweak, 32);
+        encrypt_dynamic_phase_1!(self.parity_key, self.state, self.parity_tweak, 36);
+        encrypt_dynamic_phase_0!(self.parity_key, self.state, self.parity_tweak, 40);
+        encrypt_dynamic_phase_1!(self.parity_key, self.state, self.parity_tweak, 44);
+        encrypt_dynamic_phase_0!(self.parity_key, self.state, self.parity_tweak, 48);
+        encrypt_dynamic_phase_1!(self.parity_key, self.state, self.parity_tweak, 52);
+        encrypt_dynamic_phase_0!(self.parity_key, self.state, self.parity_tweak, 56);
+        encrypt_dynamic_phase_1!(self.parity_key, self.state, self.parity_tweak, 60);
+        encrypt_dynamic_phase_0!(self.parity_key, self.state, self.parity_tweak, 64);
+        encrypt_dynamic_phase_1!(self.parity_key, self.state, self.parity_tweak, 68);
+        add_subkey_dynamic!(self.parity_key, self.state, self.parity_tweak, 72);
+        *ciphertext_output = self.state;
+    }
+}
+impl Threefish512Dynamic {
+    pub fn new(
+        key:   & [u64],
+        tweak: & [u64]
+    ) -> Self
+    {
+        let mut tf = Self {
+            parity_key:   [0u64; NUM_KEY_WORDS_WITH_PARITY],
+            parity_tweak: [0u64; NUM_TWEAK_WORDS_WITH_PARITY],
+            state:        [0u64; NUM_BLOCK_WORDS]
+        };
+        tf.rekey(key, tweak);
 
-        encrypt_static_phase_0!(self.key_schedule, self.state,  0);
-        encrypt_static_phase_1!(self.key_schedule, self.state,  4);
-        encrypt_static_phase_0!(self.key_schedule, self.state,  8);
-        encrypt_static_phase_1!(self.key_schedule, self.state, 12);
-        encrypt_static_phase_0!(self.key_schedule, self.state, 16);
-        encrypt_static_phase_1!(self.key_schedule, self.state, 20);
-        encrypt_static_phase_0!(self.key_schedule, self.state, 24);
-        encrypt_static_phase_1!(self.key_schedule, self.state, 28);
-        encrypt_static_phase_0!(self.key_schedule, self.state, 32);
-        encrypt_static_phase_1!(self.key_schedule, self.state, 36);
-        encrypt_static_phase_0!(self.key_schedule, self.state, 40);
-        encrypt_static_phase_1!(self.key_schedule, self.state, 44);
-        encrypt_static_phase_0!(self.key_schedule, self.state, 48);
-        encrypt_static_phase_1!(self.key_schedule, self.state, 52);
-        encrypt_static_phase_0!(self.key_schedule, self.state, 56);
-        encrypt_static_phase_1!(self.key_schedule, self.state, 60);
-        encrypt_static_phase_0!(self.key_schedule, self.state, 64);
-        encrypt_static_phase_1!(self.key_schedule, self.state, 68);
-        add_subkey_static!(self.key_schedule, self.state, 72);
-
-        ciphertext_output.copy_from_slice(&self.state);
+        tf
+    }
+    pub fn rekey(
+        &mut self,
+        key:   & [u64],
+        tweak: & [u64]
+    )
+    {
+        debug_assert!(key.len()   >= NUM_KEY_WORDS);
+        debug_assert!(tweak.len() >= NUM_TWEAK_WORDS);
+        self.parity_key[..NUM_KEY_WORDS].copy_from_slice(&key[..NUM_KEY_WORDS]);
+        self.parity_tweak[..NUM_TWEAK_WORDS].copy_from_slice(&tweak[..NUM_TWEAK_WORDS]);
+        Self::compute_parity_words(&mut self.parity_key, &mut self.parity_tweak);
     }
 }
