@@ -4,6 +4,7 @@ pub fn add(left: u64, right: u64) -> u64 {
 }
 
 pub mod tf512;
+pub mod ubi512;
 
 #[cfg(test)]
 mod tests {
@@ -39,7 +40,6 @@ mod tests {
         const NULL_KEY:   Key   = [0; NUM_KEY_WORDS_WITH_PARITY];
         const NULL_TWEAK: Tweak = [0; NUM_TWEAK_WORDS_WITH_PARITY];
         const NULL_BLOCK: Block = [0; NUM_BLOCK_WORDS];
-        const NULL_TPL:   Tpl   = (NULL_KEY, NULL_TWEAK, NULL_BLOCK);
 
         const TEST_KEY_0: Key = {
             let mut k: Key = NULL_KEY;
@@ -71,7 +71,7 @@ mod tests {
                 let mut s_out  = NULL_BLOCK;
                 tf512s.encipher_2(&mut s_out, &t.2);
 
-                let mut tf512d = Threefish512Dynamic::new(&mut t.0, &mut t.1);
+                let mut tf512d = Threefish512Dynamic::new(t.0.clone(), t.1.clone());
                 let mut d_out  = NULL_BLOCK;
                 tf512d.encipher_2(&mut d_out, &t.2);
 
