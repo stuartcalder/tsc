@@ -34,19 +34,20 @@ macro_rules! xor_512_bits {
 macro_rules! rekey_encipher_xor {
     ($ubi:expr) => {{
         $ubi.threefish512.rekey();
-        let k: &mut [u64] = &mut $ubi.threefish512.key[..tf512::NUM_BLOCK_WORDS];
+        let mut buf: [u64; tf512::NUM_KEY_WORDS] = [0; tf512::NUM_KEY_WORDS];
         $ubi.threefish512.encipher_2(
-            k,
+            &mut buf,
             &$ubi.msg
         );
-        }
+        xor_512_bits!(buf, $ubi.msg);
+        $ubi.threefish512.key[..tf512::NUM_KEY_WORDS].copy_from_slice(&buf);
         xor_512_bits!($ubi.threefish512.key, $ubi.msg);
     }}
 }
 
 macro_rules! get_tweak_flags_mut {
     ($ubi:expr) => {unsafe {
-        let flag: *mut u8 = $ubi.threefish512.tweak.get_unchecked_mut(
+        let flag = $ubi.threefish512.tweak.get_unchecked_mut(
             tf512::NUM_TWEAK_WORDS - 1
         ) as *mut _ as *mut u8;
         &mut *flag.offset((std::mem::size_of::<u64>() - 1) as isize)
@@ -88,17 +89,26 @@ impl Ubi512
             msg:   [0u64; tf512::NUM_BLOCK_WORDS],
         }
     }
-    pub fn chainConfig(
+    pub fn chain_config(
         &mut self,
         num_output_bits: u64)
     {
         initialize_tweak!(self, TWEAK_LAST_BIT | TYPEMASK_CFG);
-        *get_tweak_position_mut!(self) = 8u64.to_le();
+        *get_tweak_position_mut!(self) = 32u64.to_le();
         self.msg = CONFIG_INIT.clone();
         self.msg[1] = num_output_bits.to_le();
         rekey_encipher_xor!(self);
     }
+    pub fn chain_native_output(
+        &mut self,
+        output: &mut [u8])
+    {
+        debug_assert!(output.len() == tf512::NUM_BLOCK_BYTES);
+
+        initialize_tweak!(self, TWEAK_LAST_BIT | TYPEMASK_OUT);
+        *get_tweak_position_mut!(self) = 8u64.to_le();
+        self.msg.fill(0u64);
+        rekey_encipher_xor!(self);
+    }
 }
-
-
 
