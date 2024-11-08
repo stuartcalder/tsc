@@ -1,3 +1,5 @@
+use std::mem::transmute;
+
 use crate::tf512;
 use tf512::{Threefish512,Threefish512Dynamic};
 
@@ -18,7 +20,7 @@ pub const TYPEMASK_NON: u8 = 20u8;
 pub const TYPEMASK_MSG: u8 = 48u8;
 pub const TYPEMASK_OUT: u8 = 63u8;
 
-macro_rules! xor_512_bits {
+macro_rules! xor_8_words {
     ($dest:expr, $src:expr) => {unsafe {
         *$dest.get_unchecked_mut(0) ^= *$src.get_unchecked_mut(0);
         *$dest.get_unchecked_mut(1) ^= *$src.get_unchecked_mut(1);
@@ -32,17 +34,11 @@ macro_rules! xor_512_bits {
 }
 
 macro_rules! rekey_encipher_xor {
-    ($ubi:expr) => {{
+    ($ubi:expr) => {
         $ubi.threefish512.rekey();
-        let mut buf: [u64; tf512::NUM_KEY_WORDS] = [0; tf512::NUM_KEY_WORDS];
-        $ubi.threefish512.encipher_2(
-            &mut buf,
-            &$ubi.msg
-        );
-        xor_512_bits!(buf, $ubi.msg);
-        $ubi.threefish512.key[..tf512::NUM_KEY_WORDS].copy_from_slice(&buf);
-        xor_512_bits!($ubi.threefish512.key, $ubi.msg);
-    }}
+        $ubi.threefish512.encipher_into_key(&$ubi.msg);
+        xor_8_words!($ubi.threefish512.key, $ubi.msg);
+    }
 }
 
 macro_rules! get_tweak_flags_mut {
@@ -75,7 +71,7 @@ pub struct Ubi512
 
 const CONFIG_INIT: [u64; tf512::NUM_BLOCK_WORDS] = [
     0x5348413301000000u64.to_be(), 0u64, 0u64, 0u64,
-    0u64, 0u64, 0u64, 0u64
+    0u64                         , 0u64, 0u64, 0u64
 ];
 
 impl Ubi512
@@ -109,6 +105,12 @@ impl Ubi512
         *get_tweak_position_mut!(self) = 8u64.to_le();
         self.msg.fill(0u64);
         rekey_encipher_xor!(self);
+        let key_bytes: &[u8] = unsafe {
+            std::slice::from_raw_parts(
+                &self.threefish512.key as *const _ as *const u8,
+                std::mem::size_of::<u64>() * tf512::NUM_KEY_WORDS
+            )
+        };
+        output.copy_from_slice(key_bytes);
     }
 }
-
