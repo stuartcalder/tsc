@@ -82,7 +82,6 @@ mod tests {
     } // ~ compare_threefish_impls()
     #[test]
     fn test_skein() {
-        use ubi512::*;
         use skein512::*;
         let mut ubi512 = Ubi512::new();
         let mut hash_output: [u8; 64] = [0u8; 64];
