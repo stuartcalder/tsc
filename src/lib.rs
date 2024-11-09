@@ -8,6 +8,7 @@ pub mod ubi512;
 pub mod skein512;
 pub mod csprng;
 pub mod rand;
+pub mod catena512;
 
 #[cfg(test)]
 mod tests {
