@@ -6,6 +6,7 @@ pub fn add(left: u64, right: u64) -> u64 {
 pub mod tf512;
 pub mod ubi512;
 pub mod skein512;
+pub mod csprng;
 
 #[cfg(test)]
 mod tests {

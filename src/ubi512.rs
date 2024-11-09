@@ -20,6 +20,10 @@ pub const TYPEMASK_NON: u8 = 20u8;
 pub const TYPEMASK_MSG: u8 = 48u8;
 pub const TYPEMASK_OUT: u8 = 63u8;
 
+pub const NUM_HASH_BYTES: usize = tf512::NUM_BLOCK_BYTES;
+pub const NUM_HASH_WORDS: usize = tf512::NUM_BLOCK_WORDS;
+
+/// Exclusive-Or 8 unsigned 64-bit integers.
 macro_rules! xor_8_words {
     ($dest:expr, $src:expr) => {unsafe {
         *$dest.get_unchecked_mut(0) ^= *$src.get_unchecked_mut(0);
@@ -33,6 +37,11 @@ macro_rules! xor_8_words {
     }}
 }
 
+/**
+ * Recompute the parity words for the Threefish512 key and tweak,
+ * then encipher the input message into the Threefish512 key buffer and
+ * XOR the plaintext message into the ciphertext in the Threefish512 key buffer.
+ */
 macro_rules! rekey_encipher_xor {
     ($ubi:expr) => {
         $ubi.threefish512.rekey();
@@ -40,7 +49,7 @@ macro_rules! rekey_encipher_xor {
         xor_8_words!($ubi.threefish512.key, $ubi.msg);
     }
 }
-
+/// Get a mutable reference to the u8 with the Threefish512 tweak bit flags.
 macro_rules! get_tweak_flags_mut {
     ($ubi:expr) => {unsafe {
         let flag = $ubi.threefish512.tweak.get_unchecked_mut(
@@ -49,13 +58,13 @@ macro_rules! get_tweak_flags_mut {
         &mut *flag.offset((std::mem::size_of::<u64>() - 1) as isize)
     }}
 }
-
+/// Get a mutable reference to the u64 representing the Threefish512 tweak 'position' field.
 macro_rules! get_tweak_position_mut {
     ($ubi:expr) => {unsafe {
         $ubi.threefish512.tweak.get_unchecked_mut(0)
     }}
 }
-
+/// Get a mutable reference to the u64 representing the 'counter' of the message field.
 macro_rules! get_msg_counter_mut {
     ($ubi:expr) => {unsafe {
         $ubi.msg.get_unchecked_mut(0)
@@ -90,10 +99,10 @@ macro_rules! as_bytes_mut {
 pub struct Ubi512
 {
     pub threefish512: Threefish512Dynamic,
-    pub msg:          [u64; tf512::NUM_BLOCK_WORDS],
+    pub msg:          [u64; NUM_HASH_WORDS],
 }
 
-const CONFIG_INIT: [u64; tf512::NUM_BLOCK_WORDS] = [
+const CONFIG_INIT: [u64; NUM_HASH_WORDS] = [
     0x5348413301000000u64.to_be(), 0u64, 0u64, 0u64,
     0u64                         , 0u64, 0u64, 0u64
 ];
@@ -106,7 +115,7 @@ impl Ubi512
                 [0u64; tf512::NUM_KEY_WORDS_WITH_PARITY],
                 [0u64; tf512::NUM_TWEAK_WORDS_WITH_PARITY]
             ),
-            msg: [0u64; tf512::NUM_BLOCK_WORDS],
+            msg: [0u64; NUM_HASH_WORDS],
         }
     }
     pub fn chain_config(
@@ -123,13 +132,13 @@ impl Ubi512
         &mut self,
         output: &mut [u8])
     {
-        debug_assert!(output.len() == tf512::NUM_BLOCK_BYTES);
+        debug_assert!(output.len() == NUM_HASH_BYTES);
 
         initialize_tweak!(self, TWEAK_LAST_BIT | TYPEMASK_OUT);
         *get_tweak_position_mut!(self) = 8u64.to_le();
         self.msg.fill(0u64);
         rekey_encipher_xor!(self);
-        let key_bytes: &[u8] = as_bytes!(&self.threefish512.key, tf512::NUM_KEY_WORDS);
+        let key_bytes: &[u8] = as_bytes!(&self.threefish512.key, NUM_HASH_WORDS);
         output.copy_from_slice(key_bytes);
     }
     pub fn chain_message(
@@ -138,33 +147,33 @@ impl Ubi512
     )
     {
         initialize_tweak!(self, TYPEMASK_MSG);
-        if input.len() <= tf512::NUM_BLOCK_BYTES {
+        if input.len() <= NUM_HASH_BYTES {
             *get_tweak_flags_mut!(self)   |= TWEAK_LAST_BIT;
             *get_tweak_position_mut!(self) = {input.len() as u64}.to_le();
             {
-                let msg_bytes: &mut [u8] = as_bytes_mut!(&mut self.msg, tf512::NUM_BLOCK_WORDS);
+                let msg_bytes: &mut [u8] = as_bytes_mut!(&mut self.msg, NUM_HASH_WORDS);
                 msg_bytes[..input.len()].copy_from_slice(input);
-                if input.len() != tf512::NUM_BLOCK_BYTES {
+                if input.len() != NUM_HASH_BYTES {
                     msg_bytes[input.len()..].fill(0u8);
                 }
             }
             rekey_encipher_xor!(self);
             return;
         }
-        *get_tweak_position_mut!(self) = {tf512::NUM_BLOCK_BYTES as u64}.to_le();
+        *get_tweak_position_mut!(self) = {NUM_HASH_BYTES as u64}.to_le();
         {
-            let msg_bytes: &mut [u8] = as_bytes_mut!(&mut self.msg, tf512::NUM_BLOCK_WORDS);
-            msg_bytes.copy_from_slice(&input[..tf512::NUM_BLOCK_BYTES]);
+            let msg_bytes: &mut [u8] = as_bytes_mut!(&mut self.msg, NUM_HASH_WORDS);
+            msg_bytes.copy_from_slice(&input[..NUM_HASH_BYTES]);
         }
         rekey_encipher_xor!(self);
         *get_tweak_flags_mut!(self) &= TWEAK_FIRST_MASK;
 
-        let mut input_idx = tf512::NUM_BLOCK_BYTES as usize;
-        while (input.len() - input_idx) > tf512::NUM_BLOCK_BYTES {
-            let next_idx = input_idx + tf512::NUM_BLOCK_BYTES;
-            *get_tweak_position_mut!(self) += tf512::NUM_BLOCK_BYTES as u64;
+        let mut input_idx = NUM_HASH_BYTES as usize;
+        while (input.len() - input_idx) > NUM_HASH_BYTES {
+            let next_idx = input_idx + NUM_HASH_BYTES;
+            *get_tweak_position_mut!(self) += NUM_HASH_BYTES as u64;
             {
-                let msg_bytes: &mut [u8] = as_bytes_mut!(&mut self.msg, tf512::NUM_BLOCK_WORDS);
+                let msg_bytes: &mut [u8] = as_bytes_mut!(&mut self.msg, NUM_HASH_WORDS);
                 msg_bytes.copy_from_slice(&input[input_idx..next_idx]);
             }
             rekey_encipher_xor!(self);
@@ -176,9 +185,9 @@ impl Ubi512
             u64::from_le(*get_tweak_position_mut!(self)) + {bytes_remaining as u64}
         }.to_le();
         {
-            let msg_bytes: &mut [u8] = as_bytes_mut!(&mut self.msg, tf512::NUM_BLOCK_WORDS);
+            let msg_bytes: &mut [u8] = as_bytes_mut!(&mut self.msg, NUM_HASH_WORDS);
             msg_bytes[..bytes_remaining].copy_from_slice(&input[input_idx..]);
-            if bytes_remaining != tf512::NUM_BLOCK_BYTES {
+            if bytes_remaining != NUM_HASH_BYTES {
                 msg_bytes[bytes_remaining..].fill(0u8);
             }
         }

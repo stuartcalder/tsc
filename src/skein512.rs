@@ -1,9 +1,12 @@
 use crate::tf512;
 use crate::ubi512;
-// TODO
 use ubi512::Ubi512;
 
-pub struct Skein512(Ubi512);
+pub use ubi512::{NUM_HASH_BYTES, NUM_HASH_WORDS};
+
+pub struct Skein512 {
+    pub ubi512: Ubi512
+}
 
 pub const NATIVE_INIT: [u64; 8] = [
     0xce519c74ffad0349u64.to_be(),
@@ -19,7 +22,9 @@ pub const NATIVE_INIT: [u64; 8] = [
 impl Skein512 {
 
     pub fn new() -> Skein512 {
-        Skein512(Ubi512::new())
+        Skein512 {
+            ubi512: Ubi512::new()
+        }
     }
 
     pub fn hash(
@@ -28,12 +33,11 @@ impl Skein512 {
         input:  &[u8]
     )
     {
-        self.0.threefish512.key.fill(0u64);
-        self.0.chain_config({output.len() as u64} * 8u64);
-        self.0.chain_message(input);
-        self.0.chain_output(output);
+        self.ubi512.threefish512.key.fill(0u64);
+        self.ubi512.chain_config({output.len() as u64} * 8u64);
+        self.ubi512.chain_message(input);
+        self.ubi512.chain_output(output);
     }
-    
     
     pub fn hash_native(
         &mut self,
@@ -41,10 +45,10 @@ impl Skein512 {
         input:  &[u8]
     )
     {
-        debug_assert!(output.len() == tf512::NUM_BLOCK_BYTES);
-        self.0.threefish512.key[..NATIVE_INIT.len()].copy_from_slice(&NATIVE_INIT);
-        self.0.chain_message(input);
-        self.0.chain_output(output);
+        debug_assert!(output.len() == ubi512::NUM_HASH_BYTES);
+        self.ubi512.threefish512.key[..NATIVE_INIT.len()].copy_from_slice(&NATIVE_INIT);
+        self.ubi512.chain_message(input);
+        self.ubi512.chain_native_output(output);
     }
     
     pub fn mac(
@@ -54,10 +58,11 @@ impl Skein512 {
         key:    &[u64]
     )
     {
-        self.0.threefish512.key.fill(0u64);
-        self.0.chain_key(key);
-        self.0.chain_config({output.len() as u64} * 8);
-        self.0.chain_message(input);
-        self.0.chain_output(output);
+        debug_assert!(key.len() == tf512::NUM_KEY_WORDS);
+        self.ubi512.threefish512.key.fill(0u64);
+        self.ubi512.chain_key(key);
+        self.ubi512.chain_config({output.len() as u64} * 8);
+        self.ubi512.chain_message(input);
+        self.ubi512.chain_output(output);
     }
 }
