@@ -5,6 +5,7 @@ pub fn add(left: u64, right: u64) -> u64 {
 
 pub mod tf512;
 pub mod ubi512;
+pub mod skein512;
 
 #[cfg(test)]
 mod tests {
@@ -79,4 +80,13 @@ mod tests {
             }
         }
     } // ~ compare_threefish_impls()
+    #[test]
+    fn test_skein() {
+        use ubi512::*;
+        use skein512::*;
+        let mut ubi512 = Ubi512::new();
+        let mut hash_output: [u8; 64] = [0u8; 64];
+        hash_native(&mut ubi512, &mut hash_output, &[]);
+        println!("{:?}", hash_output);
+    }
 }

@@ -56,6 +56,12 @@ macro_rules! get_tweak_position_mut {
     }}
 }
 
+macro_rules! get_msg_counter_mut {
+    ($ubi:expr) => {unsafe {
+        $ubi.msg.get_unchecked_mut(0)
+    }}
+}
+
 macro_rules! initialize_tweak {
     ($ubi:expr, $init_bitwise_or:expr) => {
         $ubi.threefish512.tweak.fill(0u64);
@@ -63,10 +69,28 @@ macro_rules! initialize_tweak {
     }
 }
 
+macro_rules! as_bytes{
+    ($u64_slice:expr, $u64_size:expr) => {unsafe {
+        std::slice::from_raw_parts(
+            $u64_slice as *const _ as *const u8,
+            std::mem::size_of::<u64>() * $u64_size
+        )
+    }}
+}
+
+macro_rules! as_bytes_mut {
+    ($u64_slice:expr, $u64_size:expr) => {unsafe {
+        std::slice::from_raw_parts_mut(
+            $u64_slice as *mut _ as *mut u8,
+            std::mem::size_of::<u64>() * $u64_size
+        )
+    }}
+}
+
 pub struct Ubi512
 {
-    threefish512: Threefish512Dynamic,
-    msg:          [u64; tf512::NUM_BLOCK_WORDS],
+    pub threefish512: Threefish512Dynamic,
+    pub msg:          [u64; tf512::NUM_BLOCK_WORDS],
 }
 
 const CONFIG_INIT: [u64; tf512::NUM_BLOCK_WORDS] = [
@@ -82,7 +106,7 @@ impl Ubi512
                 [0u64; tf512::NUM_KEY_WORDS_WITH_PARITY],
                 [0u64; tf512::NUM_TWEAK_WORDS_WITH_PARITY]
             ),
-            msg:   [0u64; tf512::NUM_BLOCK_WORDS],
+            msg: [0u64; tf512::NUM_BLOCK_WORDS],
         }
     }
     pub fn chain_config(
@@ -105,12 +129,118 @@ impl Ubi512
         *get_tweak_position_mut!(self) = 8u64.to_le();
         self.msg.fill(0u64);
         rekey_encipher_xor!(self);
-        let key_bytes: &[u8] = unsafe {
-            std::slice::from_raw_parts(
-                &self.threefish512.key as *const _ as *const u8,
-                std::mem::size_of::<u64>() * tf512::NUM_KEY_WORDS
-            )
-        };
+        let key_bytes: &[u8] = as_bytes!(&self.threefish512.key, tf512::NUM_KEY_WORDS);
         output.copy_from_slice(key_bytes);
     }
+    pub fn chain_message(
+        &mut self,
+        input: &[u8]
+    )
+    {
+        initialize_tweak!(self, TYPEMASK_MSG);
+        if input.len() <= tf512::NUM_BLOCK_BYTES {
+            *get_tweak_flags_mut!(self)   |= TWEAK_LAST_BIT;
+            *get_tweak_position_mut!(self) = {input.len() as u64}.to_le();
+            {
+                let msg_bytes: &mut [u8] = as_bytes_mut!(&mut self.msg, tf512::NUM_BLOCK_WORDS);
+                msg_bytes[..input.len()].copy_from_slice(input);
+                if input.len() != tf512::NUM_BLOCK_BYTES {
+                    msg_bytes[input.len()..].fill(0u8);
+                }
+            }
+            rekey_encipher_xor!(self);
+            return;
+        }
+        *get_tweak_position_mut!(self) = {tf512::NUM_BLOCK_BYTES as u64}.to_le();
+        {
+            let msg_bytes: &mut [u8] = as_bytes_mut!(&mut self.msg, tf512::NUM_BLOCK_WORDS);
+            msg_bytes.copy_from_slice(&input[..tf512::NUM_BLOCK_BYTES]);
+        }
+        rekey_encipher_xor!(self);
+        *get_tweak_flags_mut!(self) &= TWEAK_FIRST_MASK;
+
+        let mut input_idx = tf512::NUM_BLOCK_BYTES as usize;
+        while (input.len() - input_idx) > tf512::NUM_BLOCK_BYTES {
+            let next_idx = input_idx + tf512::NUM_BLOCK_BYTES;
+            *get_tweak_position_mut!(self) += tf512::NUM_BLOCK_BYTES as u64;
+            {
+                let msg_bytes: &mut [u8] = as_bytes_mut!(&mut self.msg, tf512::NUM_BLOCK_WORDS);
+                msg_bytes.copy_from_slice(&input[input_idx..next_idx]);
+            }
+            rekey_encipher_xor!(self);
+            input_idx = next_idx;
+        }
+        let bytes_remaining = input.len().saturating_sub(input_idx as usize);
+        *get_tweak_flags_mut!(self)    |= TWEAK_LAST_BIT;
+        *get_tweak_position_mut!(self) = {
+            u64::from_le(*get_tweak_position_mut!(self)) + {bytes_remaining as u64}
+        }.to_le();
+        {
+            let msg_bytes: &mut [u8] = as_bytes_mut!(&mut self.msg, tf512::NUM_BLOCK_WORDS);
+            msg_bytes[..bytes_remaining].copy_from_slice(&input[input_idx..]);
+            if bytes_remaining != tf512::NUM_BLOCK_BYTES {
+                msg_bytes[bytes_remaining..].fill(0u8);
+            }
+        }
+        rekey_encipher_xor!(self);
+    }// ~ chain_message()
+    pub fn chain_output(
+        &mut self,
+        output: &mut [u8]
+    )
+    {
+        initialize_tweak!(self, TYPEMASK_OUT);
+        self.msg.fill(0u64);
+        *get_tweak_position_mut!(self) = 8u64;
+        if output.len() <= tf512::NUM_KEY_BYTES {
+            *get_tweak_flags_mut!(self) |= TWEAK_LAST_BIT;
+            rekey_encipher_xor!(self);
+            let key_bytes: &[u8] = as_bytes!(&self.threefish512.key, tf512::NUM_KEY_WORDS);
+            output.copy_from_slice(&key_bytes[..output.len()]);
+            return;
+        }
+        rekey_encipher_xor!(self);
+        *get_tweak_flags_mut!(self) &= TWEAK_FIRST_MASK;
+        {
+            let key_bytes: &[u8] = as_bytes!(&self.threefish512.key, tf512::NUM_KEY_WORDS);
+            output[..tf512::NUM_KEY_BYTES].copy_from_slice(&key_bytes);
+        }
+        *get_msg_counter_mut!(self) = {
+            u64::from_le(*get_msg_counter_mut!(self)) + 1u64
+        }.to_le();
+        let mut output_idx = tf512::NUM_KEY_BYTES;
+        while (output.len() - output_idx) > tf512::NUM_KEY_BYTES {
+            let next_idx = output_idx + tf512::NUM_KEY_BYTES;
+            *get_tweak_position_mut!(self) = {
+                u64::from_le(*get_tweak_position_mut!(self)) + {std::mem::size_of::<u64>() as u64}
+            }.to_le();
+            rekey_encipher_xor!(self);
+            {
+                let key_bytes: &[u8] = as_bytes!(&self.threefish512.key, tf512::NUM_KEY_WORDS);
+                output[output_idx..next_idx].copy_from_slice(&key_bytes);
+            }
+            *get_msg_counter_mut!(self) = {
+                u64::from_le(*get_msg_counter_mut!(self)) + 1u64
+            }.to_le();
+            output_idx = next_idx;
+        }
+        *get_tweak_flags_mut!(self) |= TWEAK_LAST_BIT;
+        *get_tweak_position_mut!(self) = {
+            u64::from_le(*get_tweak_position_mut!(self)) + {std::mem::size_of::<u64>() as u64}
+        }.to_le();
+        rekey_encipher_xor!(self);
+        let key_bytes: &[u8] = as_bytes!(&self.threefish512.key, tf512::NUM_KEY_WORDS);
+        let bytes_remaining = output.len().saturating_sub(output_idx as usize);
+        output[output_idx..].copy_from_slice(&key_bytes[..bytes_remaining]);
+    }// ~ chain_output()
+    pub fn chain_key(
+        &mut self,
+        key: &[u64]
+    )
+    {
+        initialize_tweak!(self, TYPEMASK_KEY | TWEAK_LAST_BIT);
+        *get_tweak_position_mut!(self) = {tf512::NUM_BLOCK_BYTES as u64}.to_le();
+        self.msg.copy_from_slice(key);
+        rekey_encipher_xor!(self);
+    }// ~ chain_key()
 }
