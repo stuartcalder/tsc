@@ -1,6 +1,12 @@
 use crate::tf512;
 use crate::ubi512;
 
+use tf512::{
+    NUM_BLOCK_BYTES,
+    NUM_BLOCK_WORDS,
+    NUM_KEY_BYTES,
+    NUM_KEY_WORDS
+};
 use ubi512::Ubi512;
 
 pub const WITHOUT_PHI_VERSION_ID: [u64; 8] = [
@@ -38,7 +44,8 @@ pub const DOMAIN_PW_SCRAMBLER: u8 = 0u8;
 pub const DOMAIN_KDF:          u8 = 1u8;
 pub const DOMAIN_POW:          u8 = 2u8;
 
-pub const MHF_TEMP_BYTES: usize = 0usize; //FIXME
+pub const NUM_MHF_BYTES: usize = tf512::NUM_BLOCK_BYTES * 2;
+pub const NUM_MHF_WORDS: usize = NUM_MHF_BYTES / 8;
 
 pub const NUM_TWEAK_PW_SALT_BYTES: usize = {
     NUM_TWEAK_BYTES + MAX_PASSWORD_BYTES + NUM_SALT_BYTES
@@ -54,29 +61,107 @@ pub const NUM_CATENA_BYTES: usize = tf512::NUM_BLOCK_BYTES + 1;
 pub const NUM_GAMMA_BUFFER_BYTES: usize = tf512::NUM_BLOCK_BYTES * 2;
 pub const NUM_GAMMA_BUFFER_WORDS: usize = NUM_GAMMA_BUFFER_BYTES / 8;
 
+pub const NUM_X_WORDS: usize = tf512::NUM_BLOCK_WORDS;
+
 #[derive(Clone, Copy)]
-struct Gamma {
+pub struct Gamma {
     buffer: [u64; NUM_GAMMA_BUFFER_WORDS],
     rng:    [u64; NUM_RNG_WORDS],
 }
 
-union Temp {
+pub union Temp {
     gamma:         Gamma,
     flap:          [u64; NUM_FLAP_WORDS],
     phi:           [u64; NUM_PHI_WORDS],
+    mhf:           [u64; NUM_MHF_WORDS],
     tweak_pw_salt: [u8;  NUM_TWEAK_PW_SALT_BYTES],
     catena:        [u8;  NUM_CATENA_BYTES],
-    mhf:           [u8;  MHF_TEMP_BYTES],
 }
 
-struct Catena {
-    ubi512:       Ubi512,
-    x:            [u64; tf512::NUM_BLOCK_WORDS],
-    salt:         [u64; NUM_SALT_WORDS],
-    graph_memory: Box::<u64>,
+pub struct Catena {
+    pub ubi512:       Ubi512,
+    pub temp:         Temp,
+    pub x:            [u64; NUM_X_WORDS],
+    pub salt:         [u64; NUM_SALT_WORDS],
+    pub graph_memory: Box::<[u64]>,
 }
 
+macro_rules! as_bytes{
+    ($u64_slice:expr, $u64_size:expr) => {unsafe {
+        std::slice::from_raw_parts(
+            $u64_slice as *const _ as *const u8,
+            std::mem::size_of::<u64>() * $u64_size
+        )
+    }}
+}
 
+macro_rules! as_bytes_mut {
+    ($u64_slice:expr, $u64_size:expr) => {unsafe {
+        std::slice::from_raw_parts_mut(
+            $u64_slice as *mut _ as *mut u8,
+            std::mem::size_of::<u64>() * $u64_size
+        )
+    }}
+}
 
-
+impl Catena {
+    pub fn new(g_high: u8) -> Catena {
+        let num_allocated_words = {1usize << {g_high + 3}};
+        let v = vec![0u64; num_allocated_words];
+        Catena {
+            ubi512: Ubi512::new(),
+            temp:   unsafe { std::mem::zeroed() },
+            x:      [0u64; NUM_X_WORDS],
+            salt:   [0u64; NUM_SALT_WORDS],
+            graph_memory: v.into_boxed_slice()
+        }
+    }
+    pub fn make_tweak(&mut self, lambda: u8, use_phi: bool) {
+        {
+            let bytes = if use_phi {
+                as_bytes!(&WITH_PHI_VERSION_ID, tf512::NUM_BLOCK_WORDS)
+            } else {
+                as_bytes!(&WITHOUT_PHI_VERSION_ID, tf512::NUM_BLOCK_WORDS)
+            };
+            unsafe {self.temp.tweak_pw_salt[..tf512::NUM_BLOCK_WORDS].copy_from_slice(
+                &bytes
+            )};
+        }
+        let mut i = tf512::NUM_BLOCK_WORDS;
+        unsafe {*self.temp.tweak_pw_salt.get_unchecked_mut(i) = DOMAIN_KDF};
+        i += 1;
+        unsafe {*self.temp.tweak_pw_salt.get_unchecked_mut(i) = lambda};
+        i += 1;
+        unsafe {*self.temp.tweak_pw_salt.get_unchecked_mut(i) = {
+            tf512::NUM_BLOCK_BYTES as u8
+        }};
+        i += 1;
+        unsafe {*self.temp.tweak_pw_salt.get_unchecked_mut(i) = {
+            (tf512::NUM_BLOCK_BYTES >> 8) as u8
+        }};
+        i += 1;
+        unsafe {*self.temp.tweak_pw_salt.get_unchecked_mut(i) = {
+            NUM_SALT_BYTES as u8
+        }};
+        i += 1;
+        unsafe {*self.temp.tweak_pw_salt.get_unchecked_mut(i) = {
+            (NUM_SALT_BYTES >> 8) as u8
+        }};
+    }
+    pub fn flap(&mut self, garlic: u8, lambda: u8, use_phi: bool) {
+        const CONFIG: [u64; NUM_BLOCK_WORDS] = [
+            0x545e7a4c7832afdbu64.to_be(),
+            0xc7ab18d287d9e62du64.to_be(),
+            0x4108903acba9a3aeu64.to_be(),
+            0x3108c7e40e0e55a0u64.to_be(),
+            0xc39ca85d6cd24671u64.to_be(),
+            0xba1b586631a3fd33u64.to_be(),
+            0x876983543c179302u64.to_be(),
+            0xd759946100b8b807u64.to_be(),
+        ];
+        self.ubi512.threefish512.key[..NUM_KEY_WORDS].copy_from_slice(
+            &CONFIG
+        );
+    }
+}
 
