@@ -19,6 +19,17 @@ pub const NATIVE_INIT: [u64; 8] = [
     0x33cc0f660ba418aeu64.to_be(),
 ];
 
+pub const OUTPUT_16_WORDS_INIT: [u64; 8] = [
+    0x545e7a4c7832afdbu64.to_be(),
+    0xc7ab18d287d9e62du64.to_be(),
+    0x4108903acba9a3aeu64.to_be(),
+    0x3108c7e40e0e55a0u64.to_be(),
+    0xc39ca85d6cd24671u64.to_be(),
+    0xba1b586631a3fd33u64.to_be(),
+    0x876983543c179302u64.to_be(),
+    0xd759946100b8b807u64.to_be(),
+];
+
 impl Skein512 {
 
     pub fn new() -> Skein512 {

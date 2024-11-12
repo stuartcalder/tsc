@@ -27,20 +27,11 @@ impl Drop for Csprng {
     }
 }
 
-const SKEIN_CFG_INIT: [u64; NUM_HASH_WORDS] = [
-    0x545e7a4c7832afdbu64.to_be(),
-    0xc7ab18d287d9e62du64.to_be(),
-    0x4108903acba9a3aeu64.to_be(),
-    0x3108c7e40e0e55a0u64.to_be(),
-    0xc39ca85d6cd24671u64.to_be(),
-    0xba1b586631a3fd33u64.to_be(),
-    0x876983543c179302u64.to_be(),
-    0xd759946100b8b807u64.to_be(),
-];
+const SKEIN_CFG_INIT: &[u64; NUM_HASH_WORDS] = &skein512::OUTPUT_16_WORDS_INIT;
 
 macro_rules! skein_hash_pre_configed {
     ($skein:expr, $out:expr, $in:expr) => {{
-        $skein.ubi512.threefish512.key[..NUM_HASH_WORDS].copy_from_slice(&SKEIN_CFG_INIT);
+        $skein.ubi512.threefish512.key[..NUM_HASH_WORDS].copy_from_slice(SKEIN_CFG_INIT);
         $skein.ubi512.chain_message($in);
         $skein.ubi512.chain_output($out);
     }}
