@@ -14,6 +14,20 @@ use skein512::{
     NUM_HASH_WORDS,
 };
 
+macro_rules! idx {
+    ($i:expr) => {
+        (($i) as usize * (NUM_HASH_BYTES as usize))
+    }
+}
+
+macro_rules! hash_native {
+    ($ubi:expr, $dest:expr, $src:expr) => {
+        $ubi.threefish512.key[..NUM_KEY_WORDS].copy_from_slice(&skein512::NATIVE_INIT);
+        $ubi.chain_message($src);
+        $ubi.chain_native_output($dest);
+    }
+}
+
 pub const WITHOUT_PHI_VERSION_ID: [u8; NUM_KEY_BYTES] = [
     0x79u8, 0xb5u8, 0x79u8, 0x1eu8, 0x9au8, 0xacu8, 0x02u8, 0x64u8,
     0x2au8, 0xaau8, 0x99u8, 0x1bu8, 0xd5u8, 0x47u8, 0xedu8, 0x14u8,
@@ -74,38 +88,6 @@ pub const NUM_X_BYTES: usize = NUM_X_WORDS * 8;
 pub const NUM_HASH_INPUT_WORDS: usize = NUM_HASH_WORDS * 2;
 pub const NUM_HASH_INPUT_BYTES: usize = NUM_HASH_INPUT_WORDS * 8;
 
-macro_rules! as_bytes{
-    ($u64_slice:expr, $u64_size:expr) => {unsafe {
-        std::slice::from_raw_parts(
-            $u64_slice as *const _ as *const u8,
-            std::mem::size_of::<u64>() * $u64_size
-        )
-    }}
-}
-
-macro_rules! as_bytes_mut {
-    ($u64_slice:expr, $u64_size:expr) => {unsafe {
-        std::slice::from_raw_parts_mut(
-            $u64_slice as *mut _ as *mut u8,
-            std::mem::size_of::<u64>() * $u64_size
-        )
-    }}
-}
-
-macro_rules! idx {
-    ($i:expr) => {
-        (($i) as usize * (NUM_HASH_BYTES as usize))
-    }
-}
-
-macro_rules! hash_native {
-    ($ubi:expr, $dest:expr, $src:expr) => {
-        $ubi.threefish512.key[..NUM_KEY_WORDS].copy_from_slice(&skein512::NATIVE_INIT);
-        $ubi.chain_message($src);
-        $ubi.chain_native_output($dest);
-    }
-}
-
 #[derive(Clone, Copy)]
 pub struct Gamma {
     buffer: [u8; NUM_GAMMA_BUFFER_BYTES],
@@ -153,21 +135,13 @@ impl Catena {
         i += 1;
         unsafe {*self.temp.tweak_pw_salt.get_unchecked_mut(i) = lambda};
         i += 1;
-        unsafe {*self.temp.tweak_pw_salt.get_unchecked_mut(i) = {
-            NUM_BLOCK_BYTES as u8
-        }};
+        unsafe {*self.temp.tweak_pw_salt.get_unchecked_mut(i) = NUM_BLOCK_BYTES as u8};
         i += 1;
-        unsafe {*self.temp.tweak_pw_salt.get_unchecked_mut(i) = {
-            (NUM_BLOCK_BYTES >> 8) as u8
-        }};
+        unsafe {*self.temp.tweak_pw_salt.get_unchecked_mut(i) = (NUM_BLOCK_BYTES >> 8) as u8};
         i += 1;
-        unsafe {*self.temp.tweak_pw_salt.get_unchecked_mut(i) = {
-            NUM_SALT_BYTES as u8
-        }};
+        unsafe {*self.temp.tweak_pw_salt.get_unchecked_mut(i) = NUM_SALT_BYTES as u8};
         i += 1;
-        unsafe {*self.temp.tweak_pw_salt.get_unchecked_mut(i) = {
-            (NUM_SALT_BYTES >> 8) as u8
-        }};
+        unsafe {*self.temp.tweak_pw_salt.get_unchecked_mut(i) = (NUM_SALT_BYTES >> 8) as u8};
     }
     pub fn flap(&mut self, garlic: u8, lambda: u8, use_phi: bool) {
         let ubi = &mut self.skein512.ubi512;
