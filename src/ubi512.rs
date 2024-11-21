@@ -5,9 +5,9 @@ use tf512::{Threefish512,Threefish512Dynamic};
 
 // The first block is being processed.
 pub const TWEAK_FIRST_BIT:  u8 = 0x40u8;
-// The first block has already been processed.
-pub const TWEAK_FIRST_MASK: u8 = 0xbfu8;
-// The last block is being processed.
+// The first block has already been Processed.
+pub const TWEAK_FIRST_MASK: u8 = 0xBFu8;
+// The last block is being processeD.
 pub const TWEAK_LAST_BIT:   u8 = 0x80u8;
 
 // A key is being processed.
@@ -244,8 +244,7 @@ impl Ubi512
     }// ~ chain_output()
     pub fn chain_key(
         &mut self,
-        key: &[u64]
-    )
+        key: &[u64])
     {
         initialize_tweak!(self, TYPEMASK_KEY | TWEAK_LAST_BIT);
         *get_tweak_position_mut!(self) = {tf512::NUM_BLOCK_BYTES as u64}.to_le();

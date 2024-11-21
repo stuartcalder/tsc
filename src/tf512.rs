@@ -21,7 +21,7 @@ pub const NUM_TWEAK_WORDS_WITH_PARITY: usize = NUM_TWEAK_WORDS + 1;
  * Instead of swapping the endianness of all those u64's and XORing with CONST_240,
  * swap the bytes of CONST_240 itself when the target is big endian.
  */
-pub const CONST_240: u64 = 0x1bd11bdaa9fc1a22u64.to_le();
+pub const CONST_240: u64 = 0x1BD11BDAA9FC1A22u64.to_le();
 pub const NUM_CTR_IV_BYTES: usize = 32;
 pub const NUM_CTR_IV_WORDS: usize = 4;
 

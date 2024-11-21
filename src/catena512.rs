@@ -29,25 +29,25 @@ macro_rules! hash_native {
 }
 
 pub const WITHOUT_PHI_VERSION_ID: [u8; NUM_KEY_BYTES] = [
-    0x79u8, 0xb5u8, 0x79u8, 0x1eu8, 0x9au8, 0xacu8, 0x02u8, 0x64u8,
-    0x2au8, 0xaau8, 0x99u8, 0x1bu8, 0xd5u8, 0x47u8, 0xedu8, 0x14u8,
-    0x74u8, 0x4du8, 0x72u8, 0xbfu8, 0x13u8, 0x22u8, 0x54u8, 0xc9u8,
-    0xadu8, 0xd6u8, 0xb9u8, 0xbeu8, 0xe8u8, 0x70u8, 0x18u8, 0xe2u8,
-    0xaau8, 0x51u8, 0x50u8, 0xe2u8, 0x1fu8, 0xcdu8, 0x90u8, 0x19u8,
-    0xb6u8, 0x1fu8, 0x0eu8, 0xc6u8, 0x05u8, 0x00u8, 0xd6u8, 0xedu8,
-    0x7cu8, 0xf2u8, 0x03u8, 0x53u8, 0xfdu8, 0x42u8, 0xa5u8, 0xa3u8,
-    0x7au8, 0x0eu8, 0xbbu8, 0xb4u8, 0xa7u8, 0xebu8, 0xdbu8, 0xabu8,
+    0x79u8, 0xB5u8, 0x79u8, 0x1Eu8, 0x9Au8, 0xACu8, 0x02u8, 0x64u8,
+    0x2Au8, 0xAAu8, 0x99u8, 0x1Bu8, 0xD5u8, 0x47u8, 0xEDu8, 0x14u8,
+    0x74u8, 0x4Du8, 0x72u8, 0xBFu8, 0x13u8, 0x22u8, 0x54u8, 0xC9u8,
+    0xADu8, 0xD6u8, 0xB9u8, 0xBEu8, 0xE8u8, 0x70u8, 0x18u8, 0xE2u8,
+    0xAAu8, 0x51u8, 0x50u8, 0xE2u8, 0x1Fu8, 0xCDu8, 0x90u8, 0x19u8,
+    0xB6u8, 0x1Fu8, 0x0Eu8, 0xC6u8, 0x05u8, 0x00u8, 0xD6u8, 0xEDu8,
+    0x7Cu8, 0xF2u8, 0x03u8, 0x53u8, 0xFDu8, 0x42u8, 0xA5u8, 0xA3u8,
+    0x7Au8, 0x0Eu8, 0xBBu8, 0xB4u8, 0xA7u8, 0xEBu8, 0xDBu8, 0xABu8,
 ];
 
 pub const WITH_PHI_VERSION_ID: [u8; NUM_KEY_BYTES] = [
-    0x1fu8, 0x23u8, 0x89u8, 0x58u8, 0x4au8, 0x4au8, 0xbbu8, 0xa5u8,
-    0x9fu8, 0x09u8, 0xcau8, 0xd4u8, 0xefu8, 0xacu8, 0x43u8, 0x1du8,
-    0xdeu8, 0x9au8, 0xb0u8, 0xf8u8, 0x69u8, 0xaau8, 0x50u8, 0xf3u8,
-    0xedu8, 0xccu8, 0xb4u8, 0x7du8, 0x6du8, 0x4fu8, 0x10u8, 0xb9u8,
-    0x8eu8, 0x6au8, 0x68u8, 0xabu8, 0x6eu8, 0x53u8, 0xbcu8, 0xd6u8,
-    0xcfu8, 0xfcu8, 0xa7u8, 0x63u8, 0x94u8, 0x44u8, 0xbdu8, 0xc7u8,
-    0xb9u8, 0x6du8, 0x09u8, 0xf5u8, 0x66u8, 0x31u8, 0xa3u8, 0xc5u8,
-    0xf3u8, 0x26u8, 0xebu8, 0x6fu8, 0xa6u8, 0xacu8, 0xb0u8, 0xa6u8,
+    0x1Fu8, 0x23u8, 0x89u8, 0x58u8, 0x4Au8, 0x4Au8, 0xBBu8, 0xA5u8,
+    0x9Fu8, 0x09u8, 0xCAu8, 0xD4u8, 0xEFu8, 0xACu8, 0x43u8, 0x1Du8,
+    0xDEu8, 0x9Au8, 0xB0u8, 0xF8u8, 0x69u8, 0xAAu8, 0x50u8, 0xF3u8,
+    0xEDu8, 0xCCu8, 0xB4u8, 0x7Du8, 0x6Du8, 0x4Fu8, 0x10u8, 0xB9u8,
+    0x8Eu8, 0x6Au8, 0x68u8, 0xABu8, 0x6Eu8, 0x53u8, 0xBCu8, 0xD6u8,
+    0xCFu8, 0xFCu8, 0xA7u8, 0x63u8, 0x94u8, 0x44u8, 0xBDu8, 0xC7u8,
+    0xB9u8, 0x6Du8, 0x09u8, 0xF5u8, 0x66u8, 0x31u8, 0xA3u8, 0xC5u8,
+    0xF3u8, 0x26u8, 0xEBu8, 0x6Fu8, 0xA6u8, 0xACu8, 0xB0u8, 0xA6u8,
 ];
 
 pub const NUM_HASH_BYTES: usize = NUM_HASH_WORDS * 8;
@@ -58,8 +58,7 @@ pub const MAX_PASSWORD_BYTES: usize = 125;
 pub const NUM_TWEAK_BYTES:    usize = {
     NUM_BLOCK_BYTES + 1 + 1 + 2 + 2
 };
-pub const NUM_RNG_BYTES: usize = NUM_BLOCK_BYTES;
-pub const NUM_RNG_WORDS: usize = NUM_RNG_BYTES / 8;
+pub const NUM_RNG_BYTES: usize = NUM_BLOCK_BYTES + 16;
 
 pub const DOMAIN_PW_SCRAMBLER: u8 = 0u8;
 pub const DOMAIN_KDF:          u8 = 1u8;
@@ -169,9 +168,7 @@ impl Catena {
         let max_hash_index = (1u64 << garlic) - 1u64;
         if max_hash_index > 1 {
             hash_native!(ubi, &mut flap[idx!(2)..idx!(3)], &flap[idx!(0)..idx!(2)]);
-            self.graph_memory[idx!(2)..idx!(3)].copy_from_slice(
-                &flap[idx!(2)..idx!(3)]
-            );
+            self.graph_memory[idx!(2)..idx!(3)].copy_from_slice(&flap[idx!(2)..idx!(3)]);
             {
                 let (low, high) = unsafe {
                     flap.split_at_mut_unchecked(idx!(2))
@@ -215,25 +212,24 @@ impl Catena {
     }// ~ fn flap()
     pub fn gamma(&mut self, garlic: u8) {
         const RNG_CONFIG: [u64; NUM_KEY_WORDS] = [
-            0xf0efcbcabfd0047bu64.to_be(),
-            0xc05d3e3a1d53e49fu64.to_be(),
-            0x07bf4ff5ce675353u64.to_be(),
-            0x9f0ef7fb22e6f4c3u64.to_be(),
-            0x74ccb9edc0502381u64.to_be(),
-            0x65277ac2b2eafb96u64.to_be(),
-            0xcb91e29759941f6du64.to_be(),
-            0x51c39fe52731d1c5u64.to_be(),
+            0xF0EFCBCABFD0047Bu64.to_be(),
+            0xC05D3E3A1D53E49Fu64.to_be(),
+            0x07BF4FF5CE675353u64.to_be(),
+            0x9F0EF7FB22E6F4C3u64.to_be(),
+            0x74CCB9EDC0502381u64.to_be(),
+            0x65277AC2B2EAFB96u64.to_be(),
+            0xCB91E29759941F6Du64.to_be(),
+            0x51C39FE52731D1C5u64.to_be(),
         ];
-        const NUM_SALTED_GARLIC_BYTES: usize = NUM_SALT_BYTES  + 1;
-        const NUM_RNG_OUTPUT_BYTES:    usize = NUM_BLOCK_BYTES + 16;
-        const J1_OFFSET:               usize = NUM_BLOCK_BYTES;
-        const J2_OFFSET:               usize = J1_OFFSET + 8;
-        const J2_END:                  usize = J2_OFFSET + 8;
+        const NUM_RNG_OUTPUT_BYTES: usize = NUM_BLOCK_BYTES + 16;
+        const J1_OFFSET:            usize = NUM_BLOCK_BYTES;
+        const J2_OFFSET:            usize = J1_OFFSET + 8;
+        const J2_END:               usize = J2_OFFSET + 8;
         let ubi = &mut self.skein512.ubi512;
         let mem = unsafe { &mut self.temp.gamma };
         mem.rng[..NUM_SALT_BYTES].copy_from_slice(&self.salt);
         unsafe { *mem.rng.get_unchecked_mut(NUM_SALT_BYTES) = garlic; }
-        hash_native!(ubi, &mut mem.rng[..NUM_HASH_BYTES], &mem.rng[..NUM_SALTED_GARLIC_BYTES]);
+        hash_native!(ubi, &mut mem.rng[..NUM_HASH_BYTES], &mem.rng[..NUM_SALT_BYTES + 1]);
         let count  = 1u64 << (((3 * garlic) + 3) / 4);
         let rshift = 64 - garlic;
         for i in 0u64..count {
@@ -251,13 +247,13 @@ impl Catena {
     }
     fn bit_reversal_idx(i: u64, garlic: u8) -> u64 {
         let mut i = i.swap_bytes();
-        i = ((i & 0x0f0f0f0f0f0f0f0fu64) << 4) |
-            ((i & 0xf0f0f0f0f0f0f0f0u64) >> 4);
+        i = ((i & 0x0F0F0F0F0F0F0F0Fu64) << 4) |
+            ((i & 0xF0F0F0F0F0F0F0F0u64) >> 4);
         i = ((i & 0x3333333333333333u64) << 2) |
-            ((i & 0xccccccccccccccccu64) >> 2);
+            ((i & 0xCCCCCCCCCCCCCCCCu64) >> 2);
         i = ((i & 0x5555555555555555u64) << 1) |
-            ((i & 0xaaaaaaaaaaaaaaaau64) >> 1);
-        return i >> (64 - garlic);
+            ((i & 0xAAAAAAAAAAAAAAAAu64) >> 1);
+        i >> (64 - garlic)
     }
     pub fn graph_hash(&mut self, garlic: u8, lambda: u8) {
         let ubi = &mut self.skein512.ubi512;
@@ -269,9 +265,9 @@ impl Catena {
             mhf[idx!(1)..idx!(2)].copy_from_slice(&self.graph_memory[idx!(0         )..idx!(1             )]);
             hash_native!(ubi, &mut self.graph_memory[..idx!(1)], &mhf[idx!(0)..idx!(2)]);
             for i in 1u64..=garlic_end {
-                mhf[idx!(0)..idx!(1)].copy_from_slice(&self.graph_memory[idx!(i - 1)..idx!(i)]);
                 let bri = Self::bit_reversal_idx(i, garlic);
-                mhf[idx!(1)..idx!(2)].copy_from_slice(&self.graph_memory[idx!(bri)..idx!(bri + 1)]);
+                mhf[idx!(0)..idx!(1)].copy_from_slice(&self.graph_memory[idx!(i - 1)..idx!(i      )]);
+                mhf[idx!(1)..idx!(2)].copy_from_slice(&self.graph_memory[idx!(bri  )..idx!(bri + 1)]);
                 hash_native!(ubi, &mut self.graph_memory[idx!(i)..idx!(i + 1)], &mhf[idx!(0)..idx!(2)]);
             }
         }
@@ -279,12 +275,12 @@ impl Catena {
     pub fn phi(&mut self, garlic: u8) {
         let ubi = &mut self.skein512.ubi512;
         let phi = unsafe { &mut self.temp.phi };
-        let last_word_index = (1u64 << garlic) - 1;
+        let last_word_index  = (1u64 << garlic) - 1;
         let rshift = 64 - garlic;
         let mut j  = u64::from_le_bytes(self.graph_memory[idx!(last_word_index)..idx!(last_word_index) + 8].try_into().unwrap());
         j >>= rshift;
         phi[idx!(0)..idx!(1)].copy_from_slice(&self.graph_memory[idx!(last_word_index)..idx!(last_word_index + 1)]);
-        phi[idx!(1)..idx!(2)].copy_from_slice(&self.graph_memory[idx!(j)..idx!(j + 1)]);
+        phi[idx!(1)..idx!(2)].copy_from_slice(&self.graph_memory[idx!(j              )..idx!(j + 1              )]);
         hash_native!(ubi, &mut self.graph_memory[..idx!(1)], &phi[..idx!(2)]);
         for i in 1u64..=last_word_index {
             j = u64::from_le_bytes(self.graph_memory[idx!(i - 1)..idx!(i)].try_into().unwrap());
@@ -299,9 +295,9 @@ impl Catena {
         &mut self,
         output: &mut [u8],
         password: &[u8],
-        g_low: u8,
-        g_high: u8,
-        lambda: u8,
+        g_low:   u8,
+        g_high:  u8,
+        lambda:  u8,
         use_phi: bool)
     {
         self.make_tweak(lambda, use_phi);
@@ -329,13 +325,11 @@ impl Catena {
                 *self.temp.catena.get_unchecked_mut(0) = g;
                 self.temp.catena[1..].copy_from_slice(&self.x);
             }
-            let c = unsafe {&self.temp.catena};
-            hash_native!(&mut self.skein512.ubi512, &mut self.x, c);
+            hash_native!(&mut self.skein512.ubi512, &mut self.x, unsafe {&self.temp.catena});
         }
         // Zero over and free the memory. Copy the buffer out of the function.
         ssc::op::secure_zero(&mut self.graph_memory);
         output[..NUM_HASH_BYTES].copy_from_slice(&self.x);
-        //TODO: Copy out.
     }
 } // ~ impl Catena
 
