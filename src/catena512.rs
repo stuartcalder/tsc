@@ -87,6 +87,8 @@ pub const NUM_X_BYTES: usize = NUM_X_WORDS * 8;
 pub const NUM_HASH_INPUT_WORDS: usize = NUM_HASH_WORDS * 2;
 pub const NUM_HASH_INPUT_BYTES: usize = NUM_HASH_INPUT_WORDS * 8;
 
+pub const ERR_PW_TOO_LARGE: i32 = 1;
+
 #[derive(Clone, Copy)]
 pub struct Gamma {
     buffer: [u8; NUM_GAMMA_BUFFER_BYTES],
@@ -108,9 +110,11 @@ pub struct Catena {
     pub x:            [u8; NUM_X_BYTES],
     pub salt:         [u8; NUM_SALT_BYTES],
     pub graph_memory: Box::<[u8]>,
+    pub g_high:       u8
 }
 
 impl Catena {
+    // PUBLIC INTERFACE.
     pub fn new(g_high: u8) -> Catena {
         let num_allocated_bytes = {1usize << {g_high + 6}};
         let v = vec![0u8;  num_allocated_bytes];
@@ -119,10 +123,59 @@ impl Catena {
             temp:         unsafe { std::mem::zeroed() },
             x:            [0u8; NUM_X_BYTES],
             salt:         [0u8; NUM_SALT_BYTES],
-            graph_memory: v.into_boxed_slice()
+            graph_memory: v.into_boxed_slice(),
+            g_high
         }
     }
-    pub fn make_tweak(&mut self, lambda: u8, use_phi: bool) {
+    pub fn get(
+        &mut self,
+        output: &mut [u8],
+        password: &[u8],
+        g_low:   u8,
+        lambda:  u8,
+        use_phi: bool) -> Result<(), i32>
+    {
+        if password.len() > MAX_PASSWORD_BYTES {
+            return Err(ERR_PW_TOO_LARGE);
+        }
+        let g_low = if g_low > self.g_high {
+            self.g_high
+        } else {
+            g_low
+        };
+        self.make_tweak(lambda, use_phi);
+        {
+            let ubi = &mut self.skein512.ubi512;
+            let salt_offset = NUM_TWEAK_BYTES + password.len();
+            let tps = unsafe {&mut self.temp.tweak_pw_salt};
+            tps[NUM_TWEAK_BYTES..salt_offset].copy_from_slice(
+                &password
+            );
+            tps[salt_offset..salt_offset + NUM_SALT_BYTES].copy_from_slice(
+                &self.salt
+            );
+            hash_native!(ubi, &mut self.x, &tps[..salt_offset + NUM_SALT_BYTES]);
+            // Initial flap.
+        }
+        self.flap((g_low + 1) / 2, lambda, use_phi);
+        // Hash the X buffer into itself.
+        hash_native!(&mut self.skein512.ubi512, &mut self.x, &self.x);
+        // Iterate over the garlics with g, from g_low to g_high.
+        for g in g_low..=self.g_high {
+            self.flap(g, lambda, use_phi);
+            unsafe {
+                *self.temp.catena.get_unchecked_mut(0) = g;
+                self.temp.catena[1..].copy_from_slice(&self.x);
+            }
+            hash_native!(&mut self.skein512.ubi512, &mut self.x, unsafe {&self.temp.catena});
+        }
+        // Zero over and free the memory. Copy the buffer out of the function.
+        ssc::op::secure_zero(&mut self.graph_memory);
+        output[..NUM_HASH_BYTES].copy_from_slice(&self.x);
+        Ok(())
+    }
+    // PRIVATE IMPLEMENTATION.
+    fn make_tweak(&mut self, lambda: u8, use_phi: bool) {
         let version_id = if use_phi {
             &WITH_PHI_VERSION_ID
         } else {
@@ -142,7 +195,7 @@ impl Catena {
         i += 1;
         unsafe {*self.temp.tweak_pw_salt.get_unchecked_mut(i) = (NUM_SALT_BYTES >> 8) as u8};
     }
-    pub fn flap(&mut self, garlic: u8, lambda: u8, use_phi: bool) {
+    fn flap(&mut self, garlic: u8, lambda: u8, use_phi: bool) {
         let ubi = &mut self.skein512.ubi512;
         let flap = unsafe{ &mut self.temp.flap };
         {
@@ -210,7 +263,7 @@ impl Catena {
             );
         }
     }// ~ fn flap()
-    pub fn gamma(&mut self, garlic: u8) {
+    fn gamma(&mut self, garlic: u8) {
         const RNG_CONFIG: [u64; NUM_KEY_WORDS] = [
             0xF0EFCBCABFD0047Bu64.to_be(),
             0xC05D3E3A1D53E49Fu64.to_be(),
@@ -232,7 +285,7 @@ impl Catena {
         hash_native!(ubi, &mut mem.rng[..NUM_HASH_BYTES], &mem.rng[..NUM_SALT_BYTES + 1]);
         let count  = 1u64 << (((3 * garlic) + 3) / 4);
         let rshift = 64 - garlic;
-        for i in 0u64..count {
+        for _i in 0u64..count {
             ubi.threefish512.key[..NUM_KEY_WORDS].copy_from_slice(&RNG_CONFIG);
             ubi.chain_message(&mem.rng[..NUM_BLOCK_BYTES]);
             ubi.chain_output(&mut mem.rng[..NUM_RNG_OUTPUT_BYTES]);
@@ -255,12 +308,12 @@ impl Catena {
             ((i & 0xAAAAAAAAAAAAAAAAu64) >> 1);
         i >> (64 - garlic)
     }
-    pub fn graph_hash(&mut self, garlic: u8, lambda: u8) {
+    fn graph_hash(&mut self, garlic: u8, lambda: u8) {
         let ubi = &mut self.skein512.ubi512;
         let mhf = unsafe {&mut self.temp.mhf};
         let garlic_end = (1u64 << garlic) - 1;
 
-        for j in 1u8..=lambda {
+        for _j in 1u8..=lambda {
             mhf[idx!(0)..idx!(1)].copy_from_slice(&self.graph_memory[idx!(garlic_end)..idx!(garlic_end + 1)]);
             mhf[idx!(1)..idx!(2)].copy_from_slice(&self.graph_memory[idx!(0         )..idx!(1             )]);
             hash_native!(ubi, &mut self.graph_memory[..idx!(1)], &mhf[idx!(0)..idx!(2)]);
@@ -272,7 +325,7 @@ impl Catena {
             }
         }
     }
-    pub fn phi(&mut self, garlic: u8) {
+    fn phi(&mut self, garlic: u8) {
         let ubi = &mut self.skein512.ubi512;
         let phi = unsafe { &mut self.temp.phi };
         let last_word_index  = (1u64 << garlic) - 1;
@@ -290,46 +343,6 @@ impl Catena {
             hash_native!(ubi, &mut self.graph_memory[idx!(i)..idx!(i + 1)], &phi[..idx!(2)]);
         }
         self.x.copy_from_slice(&self.graph_memory[idx!(last_word_index)..idx!(last_word_index + 1)]);
-    }
-    pub fn catena(
-        &mut self,
-        output: &mut [u8],
-        password: &[u8],
-        g_low:   u8,
-        g_high:  u8,
-        lambda:  u8,
-        use_phi: bool)
-    {
-        self.make_tweak(lambda, use_phi);
-        {
-            let ubi = &mut self.skein512.ubi512;
-            let password_size = password.len();
-            let salt_offset = NUM_TWEAK_BYTES + password_size;
-            let tps = unsafe {&mut self.temp.tweak_pw_salt};
-            tps[NUM_TWEAK_BYTES..salt_offset].copy_from_slice(
-                &password
-            );
-            tps[salt_offset..salt_offset + NUM_SALT_BYTES].copy_from_slice(
-                &self.salt
-            );
-            hash_native!(ubi, &mut self.x, &tps[..salt_offset + NUM_SALT_BYTES]);
-            // Initial flap.
-        }
-        self.flap((g_low + 1) / 2, lambda, use_phi);
-        // Hash the X buffer into itself.
-        hash_native!(&mut self.skein512.ubi512, &mut self.x, &self.x);
-        // Iterate over the garlics with g, from g_low to g_high.
-        for g in g_low..=g_high {
-            self.flap(g, lambda, use_phi);
-            unsafe {
-                *self.temp.catena.get_unchecked_mut(0) = g;
-                self.temp.catena[1..].copy_from_slice(&self.x);
-            }
-            hash_native!(&mut self.skein512.ubi512, &mut self.x, unsafe {&self.temp.catena});
-        }
-        // Zero over and free the memory. Copy the buffer out of the function.
-        ssc::op::secure_zero(&mut self.graph_memory);
-        output[..NUM_HASH_BYTES].copy_from_slice(&self.x);
     }
 } // ~ impl Catena
 
