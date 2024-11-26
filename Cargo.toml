@@ -5,3 +5,9 @@ edition = "2021"
 
 [dependencies]
 ssc = { path = "../ssc" }
+
+[features]
+default = [
+  "C_alignas"
+  ]
+C_alignas = []

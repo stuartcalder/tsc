@@ -1,5 +1,6 @@
 use tsc::*;
 use std::io;
+#[allow(unused)]
 use io::Write;
 
 fn main() {

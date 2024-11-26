@@ -118,6 +118,8 @@ macro_rules! add_subkey_static {
         use_subkey_static!($key_schedule_words, $state_words, +, $round_num);
     }
 }
+
+#[allow(unused)]
 macro_rules! subtract_subkey_static {
     ($key_schedule_words:expr, $state_words:expr, $round_num:literal) =>
     {
@@ -132,38 +134,38 @@ macro_rules! add_subkey_dynamic {
     {{
         const SUBKEY_IDX: usize = subkey_idx!($round_num);
 
-        let s: u64 = u64::from_le($state_words[0]);
-        let k: u64 = u64::from_le(unsafe{ *$key_words.get_unchecked_mut(SUBKEY_IDX % NUM_KEY_WORDS_WITH_PARITY) });
+        let s = u64::from_le($state_words[0]);
+        let k = u64::from_le(unsafe{ *$key_words.get_unchecked_mut(SUBKEY_IDX % NUM_KEY_WORDS_WITH_PARITY) });
         $state_words[0] = s.wrapping_add(k).to_le();
 
-        let s: u64 = u64::from_le($state_words[1]);
-        let k: u64 = u64::from_le(unsafe { *$key_words.get_unchecked_mut((SUBKEY_IDX + 1) % NUM_KEY_WORDS_WITH_PARITY)} );
+        let s = u64::from_le($state_words[1]);
+        let k = u64::from_le(unsafe{ *$key_words.get_unchecked_mut((SUBKEY_IDX + 1) % NUM_KEY_WORDS_WITH_PARITY) });
         $state_words[1] = s.wrapping_add(k).to_le();
 
-        let s: u64 = u64::from_le($state_words[2]);
-        let k: u64 = u64::from_le(unsafe { *$key_words.get_unchecked_mut((SUBKEY_IDX + 2) % NUM_KEY_WORDS_WITH_PARITY)} );
+        let s = u64::from_le($state_words[2]);
+        let k = u64::from_le(unsafe{ *$key_words.get_unchecked_mut((SUBKEY_IDX + 2) % NUM_KEY_WORDS_WITH_PARITY) });
         $state_words[2] = s.wrapping_add(k).to_le();
 
-        let s: u64 = u64::from_le($state_words[3]);
-        let k: u64 = u64::from_le(unsafe { *$key_words.get_unchecked_mut((SUBKEY_IDX + 3) % NUM_KEY_WORDS_WITH_PARITY)} );
+        let s = u64::from_le($state_words[3]);
+        let k = u64::from_le(unsafe{ *$key_words.get_unchecked_mut((SUBKEY_IDX + 3) % NUM_KEY_WORDS_WITH_PARITY) });
         $state_words[3] = s.wrapping_add(k).to_le();
 
-        let s: u64 = u64::from_le($state_words[4]);
-        let k: u64 = u64::from_le(unsafe { *$key_words.get_unchecked_mut((SUBKEY_IDX + 4) % NUM_KEY_WORDS_WITH_PARITY)} );
+        let s = u64::from_le($state_words[4]);
+        let k = u64::from_le(unsafe{ *$key_words.get_unchecked_mut((SUBKEY_IDX + 4) % NUM_KEY_WORDS_WITH_PARITY) });
         $state_words[4] = s.wrapping_add(k).to_le();
 
-        let s: u64 = u64::from_le($state_words[5]);
-        let k: u64 = u64::from_le(unsafe { *$key_words.get_unchecked_mut((SUBKEY_IDX + 5) % NUM_KEY_WORDS_WITH_PARITY)} );
-        let t: u64 = u64::from_le(unsafe { *$tweak_words.get_unchecked_mut(SUBKEY_IDX % 3) });
+        let s = u64::from_le($state_words[5]);
+        let k = u64::from_le(unsafe{ *$key_words.get_unchecked_mut((SUBKEY_IDX + 5) % NUM_KEY_WORDS_WITH_PARITY) });
+        let t = u64::from_le(unsafe{ *$tweak_words.get_unchecked_mut(SUBKEY_IDX % 3) });
         $state_words[5] = s.wrapping_add(k.wrapping_add(t)).to_le();
 
-        let s: u64 = u64::from_le($state_words[6]);
-        let k: u64 = u64::from_le(unsafe { *$key_words.get_unchecked_mut((SUBKEY_IDX + 6) % NUM_KEY_WORDS_WITH_PARITY)} );
-        let t: u64 = u64::from_le(unsafe { *$tweak_words.get_unchecked_mut((SUBKEY_IDX + 1) % 3) });
+        let s = u64::from_le($state_words[6]);
+        let k = u64::from_le(unsafe{ *$key_words.get_unchecked_mut((SUBKEY_IDX + 6) % NUM_KEY_WORDS_WITH_PARITY) });
+        let t = u64::from_le(unsafe{ *$tweak_words.get_unchecked_mut((SUBKEY_IDX + 1) % 3) });
         $state_words[6] = s.wrapping_add(k.wrapping_add(t)).to_le();
 
-        let s: u64 = u64::from_le($state_words[7]);
-        let k: u64 = u64::from_le(unsafe { *$key_words.get_unchecked_mut((SUBKEY_IDX + 7) % NUM_KEY_WORDS_WITH_PARITY)} );
+        let s = u64::from_le($state_words[7]);
+        let k = u64::from_le(unsafe{ *$key_words.get_unchecked_mut((SUBKEY_IDX + 7) % NUM_KEY_WORDS_WITH_PARITY) });
         $state_words[7] = s.wrapping_add(k.wrapping_add(SUBKEY_IDX as u64)).to_le();
     }}
 }
@@ -363,7 +365,7 @@ pub trait StreamCipher {
     fn xor_2(
         self: &mut Self,
         xor_output: &mut [u8],
-        xor_input:     & [u8],
+        xor_input:      &[u8],
         xor_count:       u64,
         keystream_index: u64
     );
@@ -371,14 +373,30 @@ pub trait StreamCipher {
 
 pub const NUM_STATIC_KEYSCHEDULE_WORDS: usize = NUM_KEY_WORDS * NUM_SUBKEYS;
 
+#[repr(C)]
 pub struct Threefish512Static {
     pub key_schedule: [u64; NUM_STATIC_KEYSCHEDULE_WORDS],
     pub state:        [u64; NUM_BLOCK_WORDS],
 }
+
 pub struct Threefish512Dynamic {
     pub state: [u64; NUM_BLOCK_WORDS],
     pub key:   [u64; NUM_KEY_WORDS_WITH_PARITY],
     pub tweak: [u64; NUM_TWEAK_WORDS_WITH_PARITY],
+}
+
+const fn ctr_pad_size() -> usize {
+    const align: usize = std::mem::align_of::<Threefish512Static>();
+    const size:  usize  = std::mem::size_of::<Threefish512Static>();
+    8 % (align + size)
+}
+#[repr(C)]
+pub struct Threefish512Ctr {
+    pub threefish512: Threefish512Static,
+    #[cfg(feature = "C_alignas")]
+    _pad: [u8; ctr_pad_size()],
+    pub keystream: [u8; NUM_BLOCK_BYTES],
+    pub buffer:    [u8; NUM_BLOCK_BYTES],
 }
 
 impl Threefish512 for Threefish512Static {}
@@ -482,8 +500,7 @@ impl Threefish512 for Threefish512Dynamic{}
 impl Threefish512Dynamic {
     pub fn new(
         key:   [u64; NUM_KEY_WORDS_WITH_PARITY],
-        tweak: [u64; NUM_TWEAK_WORDS_WITH_PARITY]
-    ) -> Self
+        tweak: [u64; NUM_TWEAK_WORDS_WITH_PARITY]) -> Self
     {
         let mut tf = Self {
             key,
@@ -494,16 +511,13 @@ impl Threefish512Dynamic {
 
         tf
     }
-    pub fn rekey(
-        &mut self
-    )
+    pub fn rekey(&mut self)
     {
         Self::compute_parity_words(&mut self.key, &mut self.tweak);
     }
     pub fn encipher_1(
         &mut self,
-        encipher_io: &mut [u64]
-    )
+        encipher_io: &mut [u64])
     {
         self.state.copy_from_slice(encipher_io);
         encrypt_dynamic_phase_0!(self.key, self.state, self.tweak,  0);
@@ -530,8 +544,7 @@ impl Threefish512Dynamic {
     pub fn encipher_2(
         self: &mut Self,
         ciphertext_output: &mut [u64],
-        plaintext_input:   &    [u64]
-    )
+        plaintext_input:   &    [u64])
     {
         self.state.copy_from_slice(plaintext_input);
         encrypt_dynamic_phase_0!(self.key, self.state, self.tweak,  0);
@@ -557,8 +570,7 @@ impl Threefish512Dynamic {
     }
     pub fn encipher_into_key(
         &mut self,
-        plaintext_input: &[u64]
-    )
+        plaintext_input: &[u64])
     {
         self.state.copy_from_slice(plaintext_input);
         encrypt_dynamic_phase_0!(self.key, self.state, self.tweak,  0);
