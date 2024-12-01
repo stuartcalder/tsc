@@ -4,6 +4,7 @@ use ubi512::Ubi512;
 
 pub use ubi512::{NUM_HASH_BYTES, NUM_HASH_WORDS};
 
+#[repr(transparent)]
 pub struct Skein512 {
     pub ubi512: Ubi512
 }
@@ -68,7 +69,7 @@ impl Skein512 {
     {
         debug_assert!(key.len() == tf512::NUM_KEY_WORDS);
         self.ubi512.threefish512.key.fill(0u64);
-        self.ubi512.chain_key(key);
+        self.ubi512.chain_key_u64(key);
         self.ubi512.chain_config({output.len() as u64} * 8);
         self.ubi512.chain_message(input);
         self.ubi512.chain_output(output);

@@ -1,7 +1,7 @@
-use tsc::*;
 use std::io;
 #[allow(unused)]
 use io::Write;
+use tsc::catena512;
 
 fn main() {
     use catena512::*;

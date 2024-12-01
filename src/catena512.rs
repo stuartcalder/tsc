@@ -89,12 +89,14 @@ pub const NUM_HASH_INPUT_BYTES: usize = NUM_HASH_INPUT_WORDS * 8;
 
 pub const ERR_PW_TOO_LARGE: i32 = 1;
 
+#[repr(C)]
 #[derive(Clone, Copy)]
 pub struct Gamma {
     buffer: [u8; NUM_GAMMA_BUFFER_BYTES],
     rng:    [u8; NUM_RNG_BYTES],
 }
 
+#[repr(C)]
 pub union Temp {
     gamma:         Gamma,
     flap:          [u8; NUM_FLAP_BYTES],
@@ -104,6 +106,7 @@ pub union Temp {
     catena:        [u8; NUM_CATENA_BYTES],
 }
 
+#[repr(C)]
 pub struct Catena {
     pub skein512:     Skein512,
     pub temp:         Temp,

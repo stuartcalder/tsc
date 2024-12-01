@@ -317,39 +317,35 @@ macro_rules! encrypt_dynamic_phase_1 {
     }
 }
 
-pub trait Threefish512 {
-    /// Shared Procedures.
-    fn compute_parity_words(
-        key:   &mut [u64],
-        tweak: &mut [u64]
-    )
-    {
-        debug_assert!(key.len()   >= NUM_KEY_WORDS_WITH_PARITY);
-        debug_assert!(tweak.len() >= NUM_TWEAK_WORDS_WITH_PARITY);
-        // Accumulate the xor of all the key words together.
-        let key_parity: u64 = unsafe {
-            *key.get_unchecked_mut(0) ^
-            *key.get_unchecked_mut(1) ^
-            *key.get_unchecked_mut(2) ^
-            *key.get_unchecked_mut(3) ^
-            *key.get_unchecked_mut(4) ^
-            *key.get_unchecked_mut(5) ^
-            *key.get_unchecked_mut(6) ^
-            *key.get_unchecked_mut(7) ^
-            CONST_240
-        };
-        // Accumulate the xor of the two tweak words.
-        let tweak_parity: u64 = unsafe {
-            *tweak.get_unchecked_mut(0) ^ *tweak.get_unchecked_mut(1)
-        };
+fn compute_parity_words(
+    key:   &mut [u64],
+    tweak: &mut [u64])
+{
+    debug_assert!(key.len()   >= NUM_KEY_WORDS_WITH_PARITY);
+    debug_assert!(tweak.len() >= NUM_TWEAK_WORDS_WITH_PARITY);
+    // Accumulate the xor of all the key words together.
+    let key_parity: u64 = unsafe {
+        *key.get_unchecked_mut(0) ^
+        *key.get_unchecked_mut(1) ^
+        *key.get_unchecked_mut(2) ^
+        *key.get_unchecked_mut(3) ^
+        *key.get_unchecked_mut(4) ^
+        *key.get_unchecked_mut(5) ^
+        *key.get_unchecked_mut(6) ^
+        *key.get_unchecked_mut(7) ^
+        CONST_240
+    };
+    // Accumulate the xor of the two tweak words.
+    let tweak_parity: u64 = unsafe {
+        *tweak.get_unchecked_mut(0) ^ *tweak.get_unchecked_mut(1)
+    };
 
-        unsafe {
-            *key.get_unchecked_mut(NUM_KEY_WORDS)     = key_parity;
-            *tweak.get_unchecked_mut(NUM_TWEAK_WORDS) = tweak_parity;
-        }
+    unsafe {
+        *key.get_unchecked_mut(NUM_KEY_WORDS)     = key_parity;
+        *tweak.get_unchecked_mut(NUM_TWEAK_WORDS) = tweak_parity;
+    }
 
-    } // ~ compute_parity_words()
-}
+} // ~ compute_parity_words()
 
 pub trait StreamCipher {
     fn init(
@@ -379,27 +375,20 @@ pub struct Threefish512Static {
     pub state:        [u64; NUM_BLOCK_WORDS],
 }
 
+#[repr(C)]
 pub struct Threefish512Dynamic {
     pub state: [u64; NUM_BLOCK_WORDS],
     pub key:   [u64; NUM_KEY_WORDS_WITH_PARITY],
     pub tweak: [u64; NUM_TWEAK_WORDS_WITH_PARITY],
 }
 
-const fn ctr_pad_size() -> usize {
-    const align: usize = std::mem::align_of::<Threefish512Static>();
-    const size:  usize  = std::mem::size_of::<Threefish512Static>();
-    8 % (align + size)
-}
 #[repr(C)]
 pub struct Threefish512Ctr {
     pub threefish512: Threefish512Static,
-    #[cfg(feature = "C_alignas")]
-    _pad: [u8; ctr_pad_size()],
-    pub keystream: [u8; NUM_BLOCK_BYTES],
-    pub buffer:    [u8; NUM_BLOCK_BYTES],
+    pub keystream:    [u8; NUM_BLOCK_BYTES],
+    pub buffer:       [u8; NUM_BLOCK_BYTES],
 }
 
-impl Threefish512 for Threefish512Static {}
 impl Threefish512Static {
     pub fn new(
         key:   &mut [u64],
@@ -412,28 +401,32 @@ impl Threefish512Static {
             key_schedule: [0; NUM_STATIC_KEYSCHEDULE_WORDS],
             state:        [0; NUM_BLOCK_WORDS]
         };
-        Self::compute_parity_words(key, tweak);
-        make_subkey!(tf.key_schedule, key, tweak,  0);
-        make_subkey!(tf.key_schedule, key, tweak,  1);
-        make_subkey!(tf.key_schedule, key, tweak,  2);
-        make_subkey!(tf.key_schedule, key, tweak,  3);
-        make_subkey!(tf.key_schedule, key, tweak,  4);
-        make_subkey!(tf.key_schedule, key, tweak,  5);
-        make_subkey!(tf.key_schedule, key, tweak,  6);
-        make_subkey!(tf.key_schedule, key, tweak,  7);
-        make_subkey!(tf.key_schedule, key, tweak,  8);
-        make_subkey!(tf.key_schedule, key, tweak,  9);
-        make_subkey!(tf.key_schedule, key, tweak, 10);
-        make_subkey!(tf.key_schedule, key, tweak, 11);
-        make_subkey!(tf.key_schedule, key, tweak, 12);
-        make_subkey!(tf.key_schedule, key, tweak, 13);
-        make_subkey!(tf.key_schedule, key, tweak, 14);
-        make_subkey!(tf.key_schedule, key, tweak, 15);
-        make_subkey!(tf.key_schedule, key, tweak, 16);
-        make_subkey!(tf.key_schedule, key, tweak, 17);
-        make_subkey!(tf.key_schedule, key, tweak, 18);
+        tf.rekey(key, tweak);
 
         tf
+    }
+    pub fn rekey(&mut self, key: &mut [u64], tweak: &mut [u64])
+    {
+        compute_parity_words(key, tweak);
+        make_subkey!(self.key_schedule, key, tweak,  0);
+        make_subkey!(self.key_schedule, key, tweak,  1);
+        make_subkey!(self.key_schedule, key, tweak,  2);
+        make_subkey!(self.key_schedule, key, tweak,  3);
+        make_subkey!(self.key_schedule, key, tweak,  4);
+        make_subkey!(self.key_schedule, key, tweak,  5);
+        make_subkey!(self.key_schedule, key, tweak,  6);
+        make_subkey!(self.key_schedule, key, tweak,  7);
+        make_subkey!(self.key_schedule, key, tweak,  8);
+        make_subkey!(self.key_schedule, key, tweak,  9);
+        make_subkey!(self.key_schedule, key, tweak, 10);
+        make_subkey!(self.key_schedule, key, tweak, 11);
+        make_subkey!(self.key_schedule, key, tweak, 12);
+        make_subkey!(self.key_schedule, key, tweak, 13);
+        make_subkey!(self.key_schedule, key, tweak, 14);
+        make_subkey!(self.key_schedule, key, tweak, 15);
+        make_subkey!(self.key_schedule, key, tweak, 16);
+        make_subkey!(self.key_schedule, key, tweak, 17);
+        make_subkey!(self.key_schedule, key, tweak, 18);
     }
     pub fn encipher_1(
         &mut self,
@@ -496,7 +489,6 @@ impl Threefish512Static {
     }
 }
 
-impl Threefish512 for Threefish512Dynamic{}
 impl Threefish512Dynamic {
     pub fn new(
         key:   [u64; NUM_KEY_WORDS_WITH_PARITY],
@@ -513,7 +505,7 @@ impl Threefish512Dynamic {
     }
     pub fn rekey(&mut self)
     {
-        Self::compute_parity_words(&mut self.key, &mut self.tweak);
+        compute_parity_words(&mut self.key, &mut self.tweak);
     }
     pub fn encipher_1(
         &mut self,

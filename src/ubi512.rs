@@ -1,7 +1,7 @@
 use std::mem::transmute;
 
 use crate::tf512;
-use tf512::{Threefish512,Threefish512Dynamic};
+use tf512::Threefish512Dynamic;
 
 // The first block is being processed.
 pub const TWEAK_FIRST_BIT:  u8 = 0x40u8;
@@ -96,6 +96,7 @@ macro_rules! as_bytes_mut {
     }}
 }
 
+#[repr(C)]
 pub struct Ubi512
 {
     pub threefish512: Threefish512Dynamic,
@@ -242,7 +243,18 @@ impl Ubi512
         let bytes_remaining = output.len().saturating_sub(output_idx as usize);
         output[output_idx..].copy_from_slice(&key_bytes[..bytes_remaining]);
     }// ~ chain_output()
-    pub fn chain_key(
+    pub fn chain_key_u8(
+        &mut self,
+        key: &[u8])
+    {
+        initialize_tweak!(self, TYPEMASK_KEY | TWEAK_LAST_BIT);
+        *get_tweak_position_mut!(self) = {tf512::NUM_BLOCK_BYTES as u64}.to_le();
+        unsafe {
+            std::slice::from_raw_parts_mut(&mut self.msg as *mut _ as *mut u8, NUM_HASH_BYTES)
+        }.copy_from_slice(key);
+        rekey_encipher_xor!(self);
+    }// ~ chain_key()
+    pub fn chain_key_u64(
         &mut self,
         key: &[u64])
     {

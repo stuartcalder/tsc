@@ -6,8 +6,10 @@ edition = "2021"
 [dependencies]
 ssc = { path = "../ssc" }
 
+[lib]
+name = "tsc"
+path = "src/lib.rs"
+
 [features]
-default = [
-  "C_alignas"
-  ]
+default = ["C_alignas"]
 C_alignas = []

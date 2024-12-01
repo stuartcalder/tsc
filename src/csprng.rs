@@ -10,6 +10,7 @@ use skein512::{NUM_HASH_BYTES, NUM_HASH_WORDS};
 pub const NUM_SEED_BYTES:   usize = ubi512::NUM_HASH_BYTES;
 pub const NUM_BUFFER_BYTES: usize = NUM_SEED_BYTES * 2;
 
+#[repr(C)]
 pub struct Csprng {
     skein512: Skein512,
     buffer:   [u8; NUM_BUFFER_BYTES],
@@ -38,7 +39,8 @@ macro_rules! skein_hash_pre_configed {
 }
 
 impl Csprng {
-    pub fn new() -> Csprng {
+    pub fn new() -> Csprng
+    {
         let mut csprng = Csprng {
             skein512: Skein512::new(),
             buffer:   [0u8; NUM_BUFFER_BYTES],
@@ -103,7 +105,8 @@ impl Csprng {
         }
         secure_zero(&mut self.buffer);
     }
-    pub fn get_random_natural_num(&mut self, max: u64) -> u64 {
+    pub fn get_random_natural_num(&mut self, max: u64) -> u64
+    {
         let num_sections = max + 1;
         let local_limit  = u64::MAX - (u64::MAX % num_sections);
         let quanta_per_section = local_limit / num_sections;
