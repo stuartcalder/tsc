@@ -24,7 +24,7 @@ macro_rules! hash_native {
     ($ubi:expr, $dest:expr, $src:expr) => {
         $ubi.threefish512.key[..NUM_KEY_WORDS].copy_from_slice(&skein512::NATIVE_INIT);
         $ubi.chain_message($src);
-        $ubi.chain_native_output($dest);
+        $ubi.chain_output_native($dest);
     }
 }
 

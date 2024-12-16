@@ -58,7 +58,7 @@ impl Skein512 {
         debug_assert!(output.len() == ubi512::NUM_HASH_BYTES);
         self.ubi512.threefish512.key[..NATIVE_INIT.len()].copy_from_slice(&NATIVE_INIT);
         self.ubi512.chain_message(input);
-        self.ubi512.chain_native_output(output);
+        self.ubi512.chain_output_native(output);
     }
     
     pub fn mac(

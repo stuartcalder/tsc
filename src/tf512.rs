@@ -187,18 +187,6 @@ macro_rules! permute {
             *$state_words.get_unchecked_mut(3) = *$state_words.get_unchecked_mut(7);
             *$state_words.get_unchecked_mut(7) = w0;
         }
-        /*
-        let mut w0: u64 = $state_words[6];
-        $state_words[6] = $state_words[0];
-        let w1: u64     = $state_words[4];
-        $state_words[4] = w0;
-        w0 = $state_words[2];
-        $state_words[2] = w1;
-        $state_words[0] = w0;
-        w0 = $state_words[3];
-        $state_words[3] = $state_words[7];
-        $state_words[7] = w0;
-        */
     }}
 }
 macro_rules! mix4_permute {
@@ -316,6 +304,52 @@ macro_rules! encrypt_dynamic_phase_1 {
         );
     }
 }
+macro_rules! encrypt_static {
+    ($static:expr) => {
+        encrypt_static_phase_0!($static.key_schedule, $static.state,  0);
+        encrypt_static_phase_1!($static.key_schedule, $static.state,  4);
+        encrypt_static_phase_0!($static.key_schedule, $static.state,  8);
+        encrypt_static_phase_1!($static.key_schedule, $static.state, 12);
+        encrypt_static_phase_0!($static.key_schedule, $static.state, 16);
+        encrypt_static_phase_1!($static.key_schedule, $static.state, 20);
+        encrypt_static_phase_0!($static.key_schedule, $static.state, 24);
+        encrypt_static_phase_1!($static.key_schedule, $static.state, 28);
+        encrypt_static_phase_0!($static.key_schedule, $static.state, 32);
+        encrypt_static_phase_1!($static.key_schedule, $static.state, 36);
+        encrypt_static_phase_0!($static.key_schedule, $static.state, 40);
+        encrypt_static_phase_1!($static.key_schedule, $static.state, 44);
+        encrypt_static_phase_0!($static.key_schedule, $static.state, 48);
+        encrypt_static_phase_1!($static.key_schedule, $static.state, 52);
+        encrypt_static_phase_0!($static.key_schedule, $static.state, 56);
+        encrypt_static_phase_1!($static.key_schedule, $static.state, 60);
+        encrypt_static_phase_0!($static.key_schedule, $static.state, 64);
+        encrypt_static_phase_1!($static.key_schedule, $static.state, 68);
+        add_subkey_static!($static.key_schedule, $static.state, 72);
+    }
+}
+macro_rules! encrypt_dynamic {
+    ($dynamic:expr) => {
+        encrypt_dynamic_phase_0!($dynamic.key, $dynamic.state, $dynamic.tweak,  0);
+        encrypt_dynamic_phase_1!($dynamic.key, $dynamic.state, $dynamic.tweak,  4);
+        encrypt_dynamic_phase_0!($dynamic.key, $dynamic.state, $dynamic.tweak,  8);
+        encrypt_dynamic_phase_1!($dynamic.key, $dynamic.state, $dynamic.tweak, 12);
+        encrypt_dynamic_phase_0!($dynamic.key, $dynamic.state, $dynamic.tweak, 16);
+        encrypt_dynamic_phase_1!($dynamic.key, $dynamic.state, $dynamic.tweak, 20);
+        encrypt_dynamic_phase_0!($dynamic.key, $dynamic.state, $dynamic.tweak, 24);
+        encrypt_dynamic_phase_1!($dynamic.key, $dynamic.state, $dynamic.tweak, 28);
+        encrypt_dynamic_phase_0!($dynamic.key, $dynamic.state, $dynamic.tweak, 32);
+        encrypt_dynamic_phase_1!($dynamic.key, $dynamic.state, $dynamic.tweak, 36);
+        encrypt_dynamic_phase_0!($dynamic.key, $dynamic.state, $dynamic.tweak, 40);
+        encrypt_dynamic_phase_1!($dynamic.key, $dynamic.state, $dynamic.tweak, 44);
+        encrypt_dynamic_phase_0!($dynamic.key, $dynamic.state, $dynamic.tweak, 48);
+        encrypt_dynamic_phase_1!($dynamic.key, $dynamic.state, $dynamic.tweak, 52);
+        encrypt_dynamic_phase_0!($dynamic.key, $dynamic.state, $dynamic.tweak, 56);
+        encrypt_dynamic_phase_1!($dynamic.key, $dynamic.state, $dynamic.tweak, 60);
+        encrypt_dynamic_phase_0!($dynamic.key, $dynamic.state, $dynamic.tweak, 64);
+        encrypt_dynamic_phase_1!($dynamic.key, $dynamic.state, $dynamic.tweak, 68);
+        add_subkey_dynamic!($dynamic.key, $dynamic.state, $dynamic.tweak, 72);
+    }
+}
 
 fn compute_parity_words(
     key:   &mut [u64],
@@ -371,8 +405,8 @@ pub const NUM_STATIC_KEYSCHEDULE_WORDS: usize = NUM_KEY_WORDS * NUM_SUBKEYS;
 
 #[repr(C)]
 pub struct Threefish512Static {
-    pub key_schedule: [u64; NUM_STATIC_KEYSCHEDULE_WORDS],
     pub state:        [u64; NUM_BLOCK_WORDS],
+    pub key_schedule: [u64; NUM_STATIC_KEYSCHEDULE_WORDS],
 }
 
 #[repr(C)]
@@ -385,8 +419,8 @@ pub struct Threefish512Dynamic {
 #[repr(C)]
 pub struct Threefish512Ctr {
     pub threefish512: Threefish512Static,
-    pub keystream:    [u8; NUM_BLOCK_BYTES],
-    pub buffer:       [u8; NUM_BLOCK_BYTES],
+    pub keystream:    [u64; NUM_BLOCK_WORDS],
+    pub buffer:       [u64; NUM_BLOCK_WORDS],
 }
 
 impl Threefish512Static {
@@ -434,57 +468,17 @@ impl Threefish512Static {
     )
     {
         self.state.copy_from_slice(encipher_io);
-
-        encrypt_static_phase_0!(self.key_schedule, self.state,  0);
-        encrypt_static_phase_1!(self.key_schedule, self.state,  4);
-        encrypt_static_phase_0!(self.key_schedule, self.state,  8);
-        encrypt_static_phase_1!(self.key_schedule, self.state, 12);
-        encrypt_static_phase_0!(self.key_schedule, self.state, 16);
-        encrypt_static_phase_1!(self.key_schedule, self.state, 20);
-        encrypt_static_phase_0!(self.key_schedule, self.state, 24);
-        encrypt_static_phase_1!(self.key_schedule, self.state, 28);
-        encrypt_static_phase_0!(self.key_schedule, self.state, 32);
-        encrypt_static_phase_1!(self.key_schedule, self.state, 36);
-        encrypt_static_phase_0!(self.key_schedule, self.state, 40);
-        encrypt_static_phase_1!(self.key_schedule, self.state, 44);
-        encrypt_static_phase_0!(self.key_schedule, self.state, 48);
-        encrypt_static_phase_1!(self.key_schedule, self.state, 52);
-        encrypt_static_phase_0!(self.key_schedule, self.state, 56);
-        encrypt_static_phase_1!(self.key_schedule, self.state, 60);
-        encrypt_static_phase_0!(self.key_schedule, self.state, 64);
-        encrypt_static_phase_1!(self.key_schedule, self.state, 68);
-        add_subkey_static!(self.key_schedule, self.state, 72);
-
+        encrypt_static!(self);
         encipher_io.copy_from_slice(&self.state);
     }
     pub fn encipher_2<'a>(
-        self: &mut Self,
+        &mut self,
         ciphertext_output: &'a mut [u64],
         plaintext_input:   &'a     [u64]
     )
     {
         self.state.copy_from_slice(plaintext_input);
-
-        encrypt_static_phase_0!(self.key_schedule, self.state,  0);
-        encrypt_static_phase_1!(self.key_schedule, self.state,  4);
-        encrypt_static_phase_0!(self.key_schedule, self.state,  8);
-        encrypt_static_phase_1!(self.key_schedule, self.state, 12);
-        encrypt_static_phase_0!(self.key_schedule, self.state, 16);
-        encrypt_static_phase_1!(self.key_schedule, self.state, 20);
-        encrypt_static_phase_0!(self.key_schedule, self.state, 24);
-        encrypt_static_phase_1!(self.key_schedule, self.state, 28);
-        encrypt_static_phase_0!(self.key_schedule, self.state, 32);
-        encrypt_static_phase_1!(self.key_schedule, self.state, 36);
-        encrypt_static_phase_0!(self.key_schedule, self.state, 40);
-        encrypt_static_phase_1!(self.key_schedule, self.state, 44);
-        encrypt_static_phase_0!(self.key_schedule, self.state, 48);
-        encrypt_static_phase_1!(self.key_schedule, self.state, 52);
-        encrypt_static_phase_0!(self.key_schedule, self.state, 56);
-        encrypt_static_phase_1!(self.key_schedule, self.state, 60);
-        encrypt_static_phase_0!(self.key_schedule, self.state, 64);
-        encrypt_static_phase_1!(self.key_schedule, self.state, 68);
-        add_subkey_static!(self.key_schedule, self.state, 72);
-
+        encrypt_static!(self);
         ciphertext_output.copy_from_slice(&self.state);
     }
 }
@@ -512,52 +506,16 @@ impl Threefish512Dynamic {
         encipher_io: &mut [u64])
     {
         self.state.copy_from_slice(encipher_io);
-        encrypt_dynamic_phase_0!(self.key, self.state, self.tweak,  0);
-        encrypt_dynamic_phase_1!(self.key, self.state, self.tweak,  4);
-        encrypt_dynamic_phase_0!(self.key, self.state, self.tweak,  8);
-        encrypt_dynamic_phase_1!(self.key, self.state, self.tweak, 12);
-        encrypt_dynamic_phase_0!(self.key, self.state, self.tweak, 16);
-        encrypt_dynamic_phase_1!(self.key, self.state, self.tweak, 20);
-        encrypt_dynamic_phase_0!(self.key, self.state, self.tweak, 24);
-        encrypt_dynamic_phase_1!(self.key, self.state, self.tweak, 28);
-        encrypt_dynamic_phase_0!(self.key, self.state, self.tweak, 32);
-        encrypt_dynamic_phase_1!(self.key, self.state, self.tweak, 36);
-        encrypt_dynamic_phase_0!(self.key, self.state, self.tweak, 40);
-        encrypt_dynamic_phase_1!(self.key, self.state, self.tweak, 44);
-        encrypt_dynamic_phase_0!(self.key, self.state, self.tweak, 48);
-        encrypt_dynamic_phase_1!(self.key, self.state, self.tweak, 52);
-        encrypt_dynamic_phase_0!(self.key, self.state, self.tweak, 56);
-        encrypt_dynamic_phase_1!(self.key, self.state, self.tweak, 60);
-        encrypt_dynamic_phase_0!(self.key, self.state, self.tweak, 64);
-        encrypt_dynamic_phase_1!(self.key, self.state, self.tweak, 68);
-        add_subkey_dynamic!(self.key, self.state, self.tweak, 72);
+        encrypt_dynamic!(self);
         encipher_io.copy_from_slice(&self.state);
     }
     pub fn encipher_2(
-        self: &mut Self,
+        &mut self,
         ciphertext_output: &mut [u64],
         plaintext_input:   &    [u64])
     {
         self.state.copy_from_slice(plaintext_input);
-        encrypt_dynamic_phase_0!(self.key, self.state, self.tweak,  0);
-        encrypt_dynamic_phase_1!(self.key, self.state, self.tweak,  4);
-        encrypt_dynamic_phase_0!(self.key, self.state, self.tweak,  8);
-        encrypt_dynamic_phase_1!(self.key, self.state, self.tweak, 12);
-        encrypt_dynamic_phase_0!(self.key, self.state, self.tweak, 16);
-        encrypt_dynamic_phase_1!(self.key, self.state, self.tweak, 20);
-        encrypt_dynamic_phase_0!(self.key, self.state, self.tweak, 24);
-        encrypt_dynamic_phase_1!(self.key, self.state, self.tweak, 28);
-        encrypt_dynamic_phase_0!(self.key, self.state, self.tweak, 32);
-        encrypt_dynamic_phase_1!(self.key, self.state, self.tweak, 36);
-        encrypt_dynamic_phase_0!(self.key, self.state, self.tweak, 40);
-        encrypt_dynamic_phase_1!(self.key, self.state, self.tweak, 44);
-        encrypt_dynamic_phase_0!(self.key, self.state, self.tweak, 48);
-        encrypt_dynamic_phase_1!(self.key, self.state, self.tweak, 52);
-        encrypt_dynamic_phase_0!(self.key, self.state, self.tweak, 56);
-        encrypt_dynamic_phase_1!(self.key, self.state, self.tweak, 60);
-        encrypt_dynamic_phase_0!(self.key, self.state, self.tweak, 64);
-        encrypt_dynamic_phase_1!(self.key, self.state, self.tweak, 68);
-        add_subkey_dynamic!(self.key, self.state, self.tweak, 72);
+        encrypt_dynamic!(self);
         ciphertext_output.copy_from_slice(&self.state);
     }
     pub fn encipher_into_key(
@@ -565,25 +523,101 @@ impl Threefish512Dynamic {
         plaintext_input: &[u64])
     {
         self.state.copy_from_slice(plaintext_input);
-        encrypt_dynamic_phase_0!(self.key, self.state, self.tweak,  0);
-        encrypt_dynamic_phase_1!(self.key, self.state, self.tweak,  4);
-        encrypt_dynamic_phase_0!(self.key, self.state, self.tweak,  8);
-        encrypt_dynamic_phase_1!(self.key, self.state, self.tweak, 12);
-        encrypt_dynamic_phase_0!(self.key, self.state, self.tweak, 16);
-        encrypt_dynamic_phase_1!(self.key, self.state, self.tweak, 20);
-        encrypt_dynamic_phase_0!(self.key, self.state, self.tweak, 24);
-        encrypt_dynamic_phase_1!(self.key, self.state, self.tweak, 28);
-        encrypt_dynamic_phase_0!(self.key, self.state, self.tweak, 32);
-        encrypt_dynamic_phase_1!(self.key, self.state, self.tweak, 36);
-        encrypt_dynamic_phase_0!(self.key, self.state, self.tweak, 40);
-        encrypt_dynamic_phase_1!(self.key, self.state, self.tweak, 44);
-        encrypt_dynamic_phase_0!(self.key, self.state, self.tweak, 48);
-        encrypt_dynamic_phase_1!(self.key, self.state, self.tweak, 52);
-        encrypt_dynamic_phase_0!(self.key, self.state, self.tweak, 56);
-        encrypt_dynamic_phase_1!(self.key, self.state, self.tweak, 60);
-        encrypt_dynamic_phase_0!(self.key, self.state, self.tweak, 64);
-        encrypt_dynamic_phase_1!(self.key, self.state, self.tweak, 68);
-        add_subkey_dynamic!(self.key, self.state, self.tweak, 72);
+        encrypt_dynamic!(self);
         self.key[..NUM_KEY_WORDS].copy_from_slice(&self.state);
+    }
+}
+
+impl Threefish512Ctr {
+    pub fn init(
+        &mut self,
+        key: &mut [u64],
+        tweak: &mut [u64],
+        ctr_iv: &[u64])
+    {
+        self.threefish512 = Threefish512Static::new(key, tweak);
+        self.keystream    = [0u64; NUM_BLOCK_WORDS];
+        self.buffer       = [0u64; NUM_BLOCK_WORDS];
+        self.keystream[NUM_CTR_IV_WORDS..].copy_from_slice(ctr_iv);
+    }
+    pub fn new(
+        key:    &mut [u64],
+        tweak:  &mut [u64],
+        ctr_iv: &[u64]) -> Self
+    {
+        let mut ctr = Self {
+            threefish512: Threefish512Static::new(key, tweak),
+            keystream:    [0u64; NUM_BLOCK_WORDS],
+            buffer:       [0u64; NUM_BLOCK_WORDS],
+        };
+        ctr.keystream[NUM_CTR_IV_WORDS..].copy_from_slice(ctr_iv);
+        ctr
+    }
+    pub fn xor_1(
+        &mut self,
+        io: &mut [u8],
+        keystream_start: u64)
+    {
+        let mut idx = 0usize;
+        if keystream_start == 0u64 {
+            self.keystream[0] = 0u64;
+        } else {
+            let starting_block: u64 = keystream_start / {NUM_BLOCK_BYTES as u64};
+            let offset: usize  = {keystream_start as usize} % NUM_BLOCK_BYTES;
+            let bytes:  usize  = NUM_BLOCK_BYTES - {offset as usize};
+            /*
+             * The first 8 bytes of a CTR keystream is the block number, so copy the block number as determined from where
+             * we're starting in the kystream into the first 8 bytes of keystream.
+             */
+            self.keystream[0] = starting_block.to_le();
+            self.threefish512.encipher_2(&mut self.buffer, &mut self.keystream);
+            self.keystream[0] = {u64::from_le(self.keystream[0]) + 1}.to_le();
+            let left: usize = if io.len() >= bytes {
+                bytes
+            } else {
+                io.len()
+            };
+            {
+                let b = unsafe {std::slice::from_raw_parts_mut(&mut self.buffer as *mut _ as *mut u8, std::mem::size_of::<u64>() * self.buffer.len())};
+                for i in 0usize..left {
+                    b[offset + i] ^= io[i];
+                }
+            }
+            {
+                let b = unsafe {std::slice::from_raw_parts(&self.buffer as *const _ as *const u8, std::mem::size_of::<u64>() * self.buffer.len())};
+                io[..left].copy_from_slice(&b[offset..left]);
+            }
+            idx = left;
+        }
+        while io.len() - idx >= NUM_BLOCK_BYTES {
+            self.threefish512.encipher_2(&mut self.buffer, &mut self.keystream);
+            self.keystream[0] += 1;
+            let next = idx + NUM_BLOCK_BYTES;
+            {
+                let b = unsafe {std::slice::from_raw_parts_mut(&mut self.buffer as *mut _ as *mut u8, std::mem::size_of::<u64>() * self.buffer.len())};
+                for i in 0usize..64usize {
+                    b[i] ^= io[idx + i];
+                }
+                io[idx..next].copy_from_slice(&b);
+            }
+            idx = next;
+        }
+        if io.len() - idx > 0 {
+            self.threefish512.encipher_2(&mut self.buffer, &mut self.keystream);
+            let b = unsafe {std::slice::from_raw_parts_mut(&mut self.buffer as *mut _ as *mut u8, std::mem::size_of::<u64>() * self.buffer.len())};
+            for i in 0usize..io.len() - idx {
+                b[i] ^= io[idx + i];
+            }
+            let len = io.len();
+            io[idx..].copy_from_slice(& b[..len - idx]);
+        }
+    }
+    pub fn xor_2(
+        &mut self,
+        output: &mut [u8],
+        input:  &[u8],
+        keystream_start: u64)
+    {
+        //TODO
     }
 }

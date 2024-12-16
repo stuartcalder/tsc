@@ -129,7 +129,7 @@ impl Ubi512
         self.msg[1] = num_output_bits.to_le();
         rekey_encipher_xor!(self);
     }
-    pub fn chain_native_output(
+    pub fn chain_output_native(
         &mut self,
         output: &mut [u8])
     {
