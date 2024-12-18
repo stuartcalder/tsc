@@ -109,10 +109,10 @@ pub union Temp {
 #[repr(C)]
 pub struct Catena {
     pub skein512:     Skein512,
-    pub temp:         Temp,
-    pub x:            [u8; NUM_X_BYTES],
-    pub salt:         [u8; NUM_SALT_BYTES],
     pub graph_memory: Box::<[u8]>,
+    pub x:            [u8; NUM_X_BYTES],
+    pub temp:         Temp,
+    pub salt:         [u8; NUM_SALT_BYTES],
     pub g_high:       u8
 }
 

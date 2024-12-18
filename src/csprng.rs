@@ -12,9 +12,9 @@ pub const NUM_BUFFER_BYTES: usize = NUM_SEED_BYTES * 2;
 
 #[repr(C)]
 pub struct Csprng {
-    skein512: Skein512,
-    buffer:   [u8; NUM_BUFFER_BYTES],
-    seed:     [u8; NUM_SEED_BYTES],
+    pub skein512: Skein512,
+    pub buffer:   [u8; NUM_BUFFER_BYTES],
+    pub seed:     [u8; NUM_SEED_BYTES],
 }
 
 impl Drop for Csprng {

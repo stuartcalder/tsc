@@ -97,6 +97,7 @@ macro_rules! as_bytes_mut {
 }
 
 #[repr(C)]
+#[derive(Clone, Copy)]
 pub struct Ubi512
 {
     pub threefish512: Threefish512Dynamic,

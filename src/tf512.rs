@@ -404,12 +404,14 @@ pub trait StreamCipher {
 pub const NUM_STATIC_KEYSCHEDULE_WORDS: usize = NUM_KEY_WORDS * NUM_SUBKEYS;
 
 #[repr(C)]
+#[derive(Clone, Copy)]
 pub struct Threefish512Static {
     pub state:        [u64; NUM_BLOCK_WORDS],
     pub key_schedule: [u64; NUM_STATIC_KEYSCHEDULE_WORDS],
 }
 
 #[repr(C)]
+#[derive(Clone, Copy)]
 pub struct Threefish512Dynamic {
     pub state: [u64; NUM_BLOCK_WORDS],
     pub key:   [u64; NUM_KEY_WORDS_WITH_PARITY],
@@ -417,6 +419,7 @@ pub struct Threefish512Dynamic {
 }
 
 #[repr(C)]
+#[derive(Clone, Copy)]
 pub struct Threefish512Ctr {
     pub threefish512: Threefish512Static,
     pub keystream:    [u64; NUM_BLOCK_WORDS],
@@ -614,9 +617,9 @@ impl Threefish512Ctr {
     }
     pub fn xor_2(
         &mut self,
-        output: &mut [u8],
-        input:  &[u8],
-        keystream_start: u64)
+        _output: &mut [u8],
+        _input:  &[u8],
+        _keystream_start: u64)
     {
         //TODO
     }

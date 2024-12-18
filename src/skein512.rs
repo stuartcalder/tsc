@@ -5,6 +5,7 @@ use ubi512::Ubi512;
 pub use ubi512::{NUM_HASH_BYTES, NUM_HASH_WORDS};
 
 #[repr(transparent)]
+#[derive(Clone, Copy)]
 pub struct Skein512 {
     pub ubi512: Ubi512
 }
