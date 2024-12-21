@@ -617,10 +617,59 @@ impl Threefish512Ctr {
     }
     pub fn xor_2(
         &mut self,
-        _output: &mut [u8],
-        _input:  &[u8],
-        _keystream_start: u64)
+        output: &mut [u8],
+        input:  &[u8],
+        keystream_start: u64)
     {
-        //TODO
+        let mut idx = 0usize;
+        if keystream_start == 0u64 {
+            self.keystream[0] = 0u64;
+        } else {
+            let starting_block: u64 = keystream_start / {NUM_BLOCK_BYTES as u64};
+            let offset: usize = {keystream_start as usize} % NUM_BLOCK_BYTES;
+            let bytes:  usize = NUM_BLOCK_BYTES - {offset as usize};
+
+            self.keystream[0] = starting_block.to_le();
+            self.threefish512.encipher_2(&mut self.buffer, &mut self.keystream);
+            self.keystream[0] = {u64::from_le(self.keystream[0]) + 1}.to_le();
+            let left: usize = if input.len() >= bytes {
+                bytes
+            } else {
+                input.len()
+            };
+            {
+                let b = unsafe {std::slice::from_raw_parts_mut(&mut self.buffer as *mut _ as *mut u8, std::mem::size_of::<u64>() * self.buffer.len())};
+                for i in 0usize..left {
+                    b[offset + i] ^= input[i];
+                }
+            }
+            {
+                let b = unsafe {std::slice::from_raw_parts(&self.buffer as *const _ as *const u8, std::mem::size_of::<u64>() * self.buffer.len())};
+                output[..left].copy_from_slice(&b[offset..left]);
+            }
+            idx = left;
+        }
+        while input.len() - idx >= NUM_BLOCK_BYTES {
+            self.threefish512.encipher_2(&mut self.buffer, &mut self.keystream);
+            self.keystream[0] += 1;
+            let next = idx + NUM_BLOCK_BYTES;
+            {
+                let b = unsafe {std::slice::from_raw_parts_mut(&mut self.buffer as *mut _ as *mut u8, std::mem::size_of::<u64>() * self.buffer.len())};
+                for i in 0usize..64usize {
+                    b[i] ^= input[idx + 1];
+                }
+                output[idx..next].copy_from_slice(&b);
+            }
+            idx = next;
+        }
+        if input.len() - idx > 0 {
+            self.threefish512.encipher_2(&mut self.buffer, &mut self.keystream);
+            let b = unsafe {std::slice::from_raw_parts_mut(&mut self.buffer as *mut _ as *mut u8, std::mem::size_of::<u64>() * self.buffer.len())};
+            for i in 0usize..input.len() - idx {
+                b[i] ^= input[idx + 1];
+            }
+            let len = input.len();
+            output[idx..].copy_from_slice(&b[..len - idx]);
+        }
     }
 }
