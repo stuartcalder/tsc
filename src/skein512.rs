@@ -4,6 +4,8 @@ use ubi512::Ubi512;
 
 pub use ubi512::{NUM_HASH_BYTES, NUM_HASH_WORDS};
 
+const DEBUG: bool = true;
+
 #[repr(transparent)]
 #[derive(Clone, Copy)]
 pub struct Skein512 {
@@ -68,11 +70,21 @@ impl Skein512 {
         input:  &[u8],
         key:    &[u64])
     {
-        debug_assert!(key.len() == tf512::NUM_KEY_WORDS);
+        if DEBUG {
+            println!("Skein MAC called.");
+            println!("output size: {}", output.len());
+            println!("input  size: {}", input.len());
+            println!("key   words: {}", key.len());
+        }
+        debug_assert!(key.len()    == tf512::NUM_KEY_WORDS);
+        debug_assert!(output.len() == tf512::NUM_KEY_BYTES);
         self.ubi512.threefish512.key.fill(0u64);
         self.ubi512.chain_key_u64(key);
         self.ubi512.chain_config({output.len() as u64} * 8);
         self.ubi512.chain_message(input);
         self.ubi512.chain_output(output);
+        if DEBUG {
+            println!("output ended up being: {:?}", output);
+        }
     }
 }

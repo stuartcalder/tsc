@@ -261,7 +261,7 @@ impl Ubi512
     {
         initialize_tweak!(self, TYPEMASK_KEY | TWEAK_LAST_BIT);
         *get_tweak_position_mut!(self) = {tf512::NUM_BLOCK_BYTES as u64}.to_le();
-        self.msg.copy_from_slice(key);
+        self.msg.copy_from_slice(&key[..tf512::NUM_KEY_WORDS]);
         rekey_encipher_xor!(self);
     }// ~ chain_key()
 }
