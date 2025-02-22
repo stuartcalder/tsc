@@ -109,24 +109,36 @@ pub union Temp {
 #[repr(C)]
 pub struct Catena {
     pub skein512:     Skein512,
-    pub graph_memory: Box::<[u8]>,
+    //pub graph_memory: Box::<[u8]>,
+    pub graph_memory: *mut u8,
     pub x:            [u8; NUM_X_BYTES],
     pub temp:         Temp,
     pub salt:         [u8; NUM_SALT_BYTES],
-    pub g_high:       u8
+    pub g_high:       u8,
 }
 
 impl Catena {
     // PUBLIC INTERFACE.
+    pub fn get_num_allocated_bytes(&self) -> usize {
+        1usize << {self.g_high + 6}
+    }
+    pub fn new_in_place(&mut self, g_high: u8) {
+        let num_allocated_bytes = {1usize << {g_high + 6}};
+        let layout = std::alloc::Layout::from_size_align(num_allocated_bytes, NUM_BLOCK_BYTES).unwrap();
+        let graph_memory = unsafe {std::alloc::alloc(layout)};
+        self.graph_memory = graph_memory;
+        self.g_high = g_high;
+    }
     pub fn new(g_high: u8) -> Catena {
         let num_allocated_bytes = {1usize << {g_high + 6}};
-        let v = vec![0u8;  num_allocated_bytes];
+        let layout = std::alloc::Layout::from_size_align(num_allocated_bytes, NUM_BLOCK_BYTES).unwrap();
+        let graph_memory = unsafe {std::alloc::alloc(layout)};
         Catena {
             skein512:     Skein512::new(),
             temp:         unsafe { std::mem::zeroed() },
             x:            [0u8; NUM_X_BYTES],
             salt:         [0u8; NUM_SALT_BYTES],
-            graph_memory: v.into_boxed_slice(),
+            graph_memory,
             g_high
         }
     }
@@ -158,8 +170,8 @@ impl Catena {
                 &self.salt
             );
             hash_native!(ubi, &mut self.x, &tps[..salt_offset + NUM_SALT_BYTES]);
-            // Initial flap.
         }
+        // Initial flap.
         self.flap((g_low + 1) / 2, lambda, use_phi);
         // Hash the X buffer into itself.
         hash_native!(&mut self.skein512.ubi512, &mut self.x, &self.x);
@@ -172,8 +184,6 @@ impl Catena {
             }
             hash_native!(&mut self.skein512.ubi512, &mut self.x, unsafe {&self.temp.catena});
         }
-        // Zero over and free the memory. Copy the buffer out of the function.
-        ssc::op::secure_zero(&mut self.graph_memory);
         output[..NUM_HASH_BYTES].copy_from_slice(&self.x);
         Ok(())
     }
@@ -199,6 +209,7 @@ impl Catena {
         unsafe {*self.temp.tweak_pw_salt.get_unchecked_mut(i) = (NUM_SALT_BYTES >> 8) as u8};
     }
     fn flap(&mut self, garlic: u8, lambda: u8, use_phi: bool) {
+        let num_allocated_bytes = self.get_num_allocated_bytes();
         let ubi = &mut self.skein512.ubi512;
         let flap = unsafe{ &mut self.temp.flap };
         {
@@ -219,12 +230,13 @@ impl Catena {
             high[idx!(1)..idx!(2)].copy_from_slice(low);
         }
         hash_native!(ubi, &mut flap[..idx!(1)], &flap[idx!(1)..idx!(3)]);
-        self.graph_memory[idx!(0)..idx!(1)].copy_from_slice(&flap[idx!(1)..idx!(2)]);
-        self.graph_memory[idx!(1)..idx!(2)].copy_from_slice(&flap[idx!(0)..idx!(1)]);
+        let graph_memory = unsafe {std::slice::from_raw_parts_mut(self.graph_memory, num_allocated_bytes)};
+        graph_memory[idx!(0)..idx!(1)].copy_from_slice(&flap[idx!(1)..idx!(2)]);
+        graph_memory[idx!(1)..idx!(2)].copy_from_slice(&flap[idx!(0)..idx!(1)]);
         let max_hash_index = (1u64 << garlic) - 1u64;
         if max_hash_index > 1 {
             hash_native!(ubi, &mut flap[idx!(2)..idx!(3)], &flap[idx!(0)..idx!(2)]);
-            self.graph_memory[idx!(2)..idx!(3)].copy_from_slice(&flap[idx!(2)..idx!(3)]);
+            graph_memory[idx!(2)..idx!(3)].copy_from_slice(&flap[idx!(2)..idx!(3)]);
             {
                 let (low, high) = unsafe {
                     flap.split_at_mut_unchecked(idx!(2))
@@ -235,7 +247,7 @@ impl Catena {
                 high[..idx!(1)].copy_from_slice(&low[..idx!(1)]);
             }
             hash_native!(ubi, &mut flap[..idx!(1)], &flap[idx!(1)..idx!(3)]);
-            self.graph_memory[idx!(3)..idx!(4)].copy_from_slice(
+            graph_memory[idx!(3)..idx!(4)].copy_from_slice(
                 &flap[..idx!(1)]
             );
         }
@@ -251,7 +263,7 @@ impl Catena {
             };
             temp_1.copy_from_slice(&temp_0);
             temp_0.copy_from_slice(&temp_2[..idx!(1)]);
-            self.graph_memory[idx!(i)..idx!(next)].copy_from_slice(
+            graph_memory[idx!(i)..idx!(next)].copy_from_slice(
                 &temp_0
             );
             i = next;
@@ -262,7 +274,7 @@ impl Catena {
             self.phi(garlic);
         } else {
             self.x.copy_from_slice(
-                &self.graph_memory[idx!(max_hash_index)..idx!(max_hash_index + 1)]
+                &graph_memory[idx!(max_hash_index)..idx!(max_hash_index + 1)]
             );
         }
     }// ~ fn flap()
@@ -281,11 +293,13 @@ impl Catena {
         const J1_OFFSET:            usize = NUM_BLOCK_BYTES;
         const J2_OFFSET:            usize = J1_OFFSET + 8;
         const J2_END:               usize = J2_OFFSET + 8;
+        let num_allocated_bytes = self.get_num_allocated_bytes();
         let ubi = &mut self.skein512.ubi512;
         let mem = unsafe { &mut self.temp.gamma };
         mem.rng[..NUM_SALT_BYTES].copy_from_slice(&self.salt);
         unsafe { *mem.rng.get_unchecked_mut(NUM_SALT_BYTES) = garlic; }
         hash_native!(ubi, &mut mem.rng[..NUM_HASH_BYTES], &mem.rng[..NUM_SALT_BYTES + 1]);
+        let graph_memory = unsafe {std::slice::from_raw_parts_mut(self.graph_memory, num_allocated_bytes)};
         let count  = 1u64 << (((3 * garlic) + 3) / 4);
         let rshift = 64 - garlic;
         for _i in 0u64..count {
@@ -296,9 +310,9 @@ impl Catena {
             j1 >>= rshift;
             let mut j2 = u64::from_le_bytes(mem.rng[J2_OFFSET..J2_END].try_into().unwrap());
             j2 >>= rshift;
-            mem.buffer[idx!(0)..idx!(1)].copy_from_slice(&self.graph_memory[idx!(j1)..idx!(j1 + 1)]);
-            mem.buffer[idx!(1)..idx!(2)].copy_from_slice(&self.graph_memory[idx!(j2)..idx!(j2 + 1)]);
-            hash_native!(ubi, &mut self.graph_memory[idx!(j1)..idx!(j1 + 1)], &mem.buffer[..idx!(2)]);
+            mem.buffer[idx!(0)..idx!(1)].copy_from_slice(&graph_memory[idx!(j1)..idx!(j1 + 1)]);
+            mem.buffer[idx!(1)..idx!(2)].copy_from_slice(&graph_memory[idx!(j2)..idx!(j2 + 1)]);
+            hash_native!(ubi, &mut graph_memory[idx!(j1)..idx!(j1 + 1)], &mem.buffer[..idx!(2)]);
         }
     }
     fn bit_reversal_idx(i: u64, garlic: u8) -> u64 {
@@ -312,40 +326,58 @@ impl Catena {
         i >> (64 - garlic)
     }
     fn graph_hash(&mut self, garlic: u8, lambda: u8) {
+        let num_allocated_bytes = self.get_num_allocated_bytes();
         let ubi = &mut self.skein512.ubi512;
         let mhf = unsafe {&mut self.temp.mhf};
         let garlic_end = (1u64 << garlic) - 1;
+        let graph_memory = unsafe {std::slice::from_raw_parts_mut(self.graph_memory, num_allocated_bytes)};
 
         for _j in 1u8..=lambda {
-            mhf[idx!(0)..idx!(1)].copy_from_slice(&self.graph_memory[idx!(garlic_end)..idx!(garlic_end + 1)]);
-            mhf[idx!(1)..idx!(2)].copy_from_slice(&self.graph_memory[idx!(0         )..idx!(1             )]);
-            hash_native!(ubi, &mut self.graph_memory[..idx!(1)], &mhf[idx!(0)..idx!(2)]);
+            mhf[idx!(0)..idx!(1)].copy_from_slice(&graph_memory[idx!(garlic_end)..idx!(garlic_end + 1)]);
+            mhf[idx!(1)..idx!(2)].copy_from_slice(&graph_memory[idx!(0         )..idx!(1             )]);
+            hash_native!(ubi, &mut graph_memory[..idx!(1)], &mhf[idx!(0)..idx!(2)]);
             for i in 1u64..=garlic_end {
                 let bri = Self::bit_reversal_idx(i, garlic);
-                mhf[idx!(0)..idx!(1)].copy_from_slice(&self.graph_memory[idx!(i - 1)..idx!(i      )]);
-                mhf[idx!(1)..idx!(2)].copy_from_slice(&self.graph_memory[idx!(bri  )..idx!(bri + 1)]);
-                hash_native!(ubi, &mut self.graph_memory[idx!(i)..idx!(i + 1)], &mhf[idx!(0)..idx!(2)]);
+                mhf[idx!(0)..idx!(1)].copy_from_slice(&graph_memory[idx!(i - 1)..idx!(i      )]);
+                mhf[idx!(1)..idx!(2)].copy_from_slice(&graph_memory[idx!(bri  )..idx!(bri + 1)]);
+                hash_native!(ubi, &mut graph_memory[idx!(i)..idx!(i + 1)], &mhf[idx!(0)..idx!(2)]);
             }
         }
     }
     fn phi(&mut self, garlic: u8) {
+        let num_allocated_bytes = self.get_num_allocated_bytes();
         let ubi = &mut self.skein512.ubi512;
         let phi = unsafe { &mut self.temp.phi };
         let last_word_index  = (1u64 << garlic) - 1;
         let rshift = 64 - garlic;
-        let mut j  = u64::from_le_bytes(self.graph_memory[idx!(last_word_index)..idx!(last_word_index) + 8].try_into().unwrap());
+        let graph_memory = unsafe {std::slice::from_raw_parts_mut(self.graph_memory, num_allocated_bytes)};
+        let mut j  = u64::from_le_bytes(graph_memory[idx!(last_word_index)..idx!(last_word_index) + 8].try_into().unwrap());
         j >>= rshift;
-        phi[idx!(0)..idx!(1)].copy_from_slice(&self.graph_memory[idx!(last_word_index)..idx!(last_word_index + 1)]);
-        phi[idx!(1)..idx!(2)].copy_from_slice(&self.graph_memory[idx!(j              )..idx!(j + 1              )]);
-        hash_native!(ubi, &mut self.graph_memory[..idx!(1)], &phi[..idx!(2)]);
+        phi[idx!(0)..idx!(1)].copy_from_slice(&graph_memory[idx!(last_word_index)..idx!(last_word_index + 1)]);
+        phi[idx!(1)..idx!(2)].copy_from_slice(&graph_memory[idx!(j              )..idx!(j + 1              )]);
+        hash_native!(ubi, &mut graph_memory[..idx!(1)], &phi[..idx!(2)]);
         for i in 1u64..=last_word_index {
-            j = u64::from_le_bytes(self.graph_memory[idx!(i - 1)..idx!(i)].try_into().unwrap());
+            j = u64::from_le_bytes(graph_memory[idx!(i - 1)..idx!(i)].try_into().unwrap());
             j >>= rshift;
-            phi[idx!(0)..idx!(1)].copy_from_slice(&self.graph_memory[idx!(i - 1)..idx!(i    )]);
-            phi[idx!(1)..idx!(2)].copy_from_slice(&self.graph_memory[idx!(j    )..idx!(j + 1)]);
-            hash_native!(ubi, &mut self.graph_memory[idx!(i)..idx!(i + 1)], &phi[..idx!(2)]);
+            phi[idx!(0)..idx!(1)].copy_from_slice(&graph_memory[idx!(i - 1)..idx!(i    )]);
+            phi[idx!(1)..idx!(2)].copy_from_slice(&graph_memory[idx!(j    )..idx!(j + 1)]);
+            hash_native!(ubi, &mut graph_memory[idx!(i)..idx!(i + 1)], &phi[..idx!(2)]);
         }
-        self.x.copy_from_slice(&self.graph_memory[idx!(last_word_index)..idx!(last_word_index + 1)]);
+        self.x.copy_from_slice(&graph_memory[idx!(last_word_index)..idx!(last_word_index + 1)]);
     }
 } // ~ impl Catena
+
+impl Drop for Catena {
+    fn drop(&mut self) {
+        let num_allocated_bytes = self.get_num_allocated_bytes();
+        if ! self.graph_memory.is_null() && num_allocated_bytes > 0 {
+            {
+                let gm = unsafe {std::slice::from_raw_parts_mut(self.graph_memory, num_allocated_bytes)};
+                ssc::op::secure_zero(gm);
+            }
+            let layout = std::alloc::Layout::from_size_align(num_allocated_bytes, NUM_BLOCK_BYTES).unwrap();
+            unsafe {std::alloc::dealloc(self.graph_memory, layout)}
+        }
+    }
+}
 
