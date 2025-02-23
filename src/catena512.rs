@@ -109,7 +109,6 @@ pub union Temp {
 #[repr(C)]
 pub struct Catena {
     pub skein512:     Skein512,
-    //pub graph_memory: Box::<[u8]>,
     pub graph_memory: *mut u8,
     pub x:            [u8; NUM_X_BYTES],
     pub temp:         Temp,
@@ -125,8 +124,7 @@ impl Catena {
     pub fn new_in_place(&mut self, g_high: u8) {
         let num_allocated_bytes = {1usize << {g_high + 6}};
         let layout = std::alloc::Layout::from_size_align(num_allocated_bytes, NUM_BLOCK_BYTES).unwrap();
-        let graph_memory = unsafe {std::alloc::alloc(layout)};
-        self.graph_memory = graph_memory;
+        self.graph_memory = unsafe {std::alloc::alloc(layout)};
         self.g_high = g_high;
     }
     pub fn new(g_high: u8) -> Catena {
