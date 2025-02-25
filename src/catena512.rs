@@ -1,3 +1,4 @@
+#![allow(unused_imports)]
 use crate::tf512;
 use crate::ubi512;
 use crate::skein512;
@@ -371,7 +372,7 @@ impl Drop for Catena {
         if ! self.graph_memory.is_null() && num_allocated_bytes > 0 {
             {
                 let gm = unsafe {std::slice::from_raw_parts_mut(self.graph_memory, num_allocated_bytes)};
-                ssc::op::secure_zero(gm);
+                rssc::op::secure_zero(gm);
             }
             let layout = std::alloc::Layout::from_size_align(num_allocated_bytes, NUM_BLOCK_BYTES).unwrap();
             unsafe {std::alloc::dealloc(self.graph_memory, layout)}

@@ -386,10 +386,9 @@ macro_rules! xor_64 {
         $into = &mut $into[8..];
         $from = &$from[8..];
         xor_8!($into, $from);
-        /* We do not assign $into on the last invocation. All uses of this macro shall drop the
-         * scope of the expression $into immediately after invoking this macro.
+        /* We do not increment the $into or $from slices on the last XOR to avoid unused assignment warnings.
+         * Consider whether incrementing either slice is appropriate at the macro invocation site.
          */
-        $from = &$from[8..];
     }
 }
 
@@ -585,6 +584,7 @@ impl Threefish512Ctr {
         self.buffer       = [0u64; NUM_BLOCK_WORDS];
         self.keystream[NUM_CTR_IV_WORDS..].copy_from_slice(ctr_iv);
     }
+
     pub fn new(
         key:    &mut [u64],
         tweak:  &mut [u64],
@@ -598,65 +598,68 @@ impl Threefish512Ctr {
         ctr.keystream[NUM_CTR_IV_WORDS..].copy_from_slice(ctr_iv);
         ctr
     }
+
     pub fn xor_1(
         &mut self,
-        io: &mut [u8],
+        input_output: &mut [u8],
         keystream_start: u64)
     {
-        let mut idx = 0usize;
-        if keystream_start == 0u64 {
+        let mut io = &mut input_output[..];
+        if keystream_start == 0 {
             self.keystream[0] = 0u64;
         } else {
-            let starting_block: u64 = keystream_start / {NUM_BLOCK_BYTES as u64};
-            let offset: usize  = {keystream_start as usize} % NUM_BLOCK_BYTES;
-            let bytes:  usize  = NUM_BLOCK_BYTES - {offset as usize};
-            /*
-             * The first 8 bytes of a CTR keystream is the block number, so copy the block number as determined from where
-             * we're starting in the kystream into the first 8 bytes of keystream.
+            let starting_block: usize = {keystream_start as usize} / NUM_BLOCK_BYTES;
+            let offset: usize = {keystream_start as usize} % NUM_BLOCK_BYTES;
+            let bytes:  usize = NUM_BLOCK_BYTES - offset;
+            /* The first 8 bytes of a CTR Keystream is the block number, so copy the block number
+             * as determined from where we're starting in the keystream into the first 8 bytes of
+             * keystream.
              */
-            self.keystream[0] = starting_block.to_le();
-            self.threefish512.encipher_2(&mut self.buffer, &mut self.keystream);
-            self.keystream[0] = {u64::from_le(self.keystream[0]) + 1}.to_le();
-            let left: usize = if io.len() >= bytes {
+            self.keystream[0] = {starting_block as u64}.to_le();
+            self.threefish512.encipher_2(&mut self.buffer, &self.keystream);
+            self.keystream[0] = {u64::from_le(self.keystream[0]) + 1}.to_le(); // Increment keystream idx.
+            let off = unsafe {
+                std::slice::from_raw_parts_mut(
+                    (&mut self.buffer as *mut _ as *mut u8).offset(offset as isize),
+                    std::mem::size_of::<u64>() * (self.buffer.len() - offset)
+                )
+            };
+            let left = if io.len() >= bytes {
                 bytes
             } else {
                 io.len()
             };
-            {
-                let b = unsafe {std::slice::from_raw_parts_mut(&mut self.buffer as *mut _ as *mut u8, std::mem::size_of::<u64>() * self.buffer.len())};
-                for i in 0usize..left {
-                    b[offset + i] ^= io[i];
-                }
+            for i in 0usize..left {
+                unsafe { *io.get_unchecked_mut(i) ^= *off.get_unchecked_mut(i) };
             }
-            {
-                let b = unsafe {std::slice::from_raw_parts(&self.buffer as *const _ as *const u8, std::mem::size_of::<u64>() * self.buffer.len())};
-                io[..left].copy_from_slice(&b[offset..left]);
-            }
-            idx = left;
+            io = &mut io[left..];
         }
-        while io.len() - idx >= NUM_BLOCK_BYTES {
-            self.threefish512.encipher_2(&mut self.buffer, &mut self.keystream);
-            self.keystream[0] += 1;
-            let next = idx + NUM_BLOCK_BYTES;
-            {
-                let b = unsafe {std::slice::from_raw_parts_mut(&mut self.buffer as *mut _ as *mut u8, std::mem::size_of::<u64>() * self.buffer.len())};
-                for i in 0usize..64usize {
-                    b[i] ^= io[idx + i];
-                }
-                io[idx..next].copy_from_slice(&b);
-            }
-            idx = next;
+        while io.len() >= NUM_BLOCK_BYTES {
+            self.threefish512.encipher_2(&mut self.buffer, &self.keystream);
+            self.keystream[0] = {u64::from_le(self.keystream[0]) + 1}.to_le(); // Increment keystream idx.
+            let mut buf_bytes = unsafe {
+                std::slice::from_raw_parts(
+                    &mut self.buffer as *const _ as *const u8,
+                    std::mem::size_of::<u64>() * self.buffer.len()
+                )
+            };
+            xor_64!(io, buf_bytes);
+            io = &mut io[8..];
         }
-        if io.len() - idx > 0 {
-            self.threefish512.encipher_2(&mut self.buffer, &mut self.keystream);
-            let b = unsafe {std::slice::from_raw_parts_mut(&mut self.buffer as *mut _ as *mut u8, std::mem::size_of::<u64>() * self.buffer.len())};
-            for i in 0usize..io.len() - idx {
-                b[i] ^= io[idx + i];
+        if io.len() > 0 {
+            self.threefish512.encipher_2(&mut self.buffer, &self.keystream);
+            let buf_bytes = unsafe {
+                std::slice::from_raw_parts(
+                    &self.buffer as *const _ as *const u8,
+                    std::mem::size_of::<u64>() * self.buffer.len()
+                )
+            };
+            for i in 0usize..io.len() {
+                unsafe { *io.get_unchecked_mut(i) ^= *buf_bytes.get_unchecked(i); }
             }
-            let len = io.len();
-            io[idx..].copy_from_slice(& b[..len - idx]);
         }
     }
+
     pub fn xor_2(
         &mut self,
         output: &mut [u8],
@@ -706,7 +709,8 @@ impl Threefish512Ctr {
                         std::mem::size_of::<u64>() * self.buffer.len()
                     )
                 };
-                xor_64!(buf_bytes, inp); // This consumes input bytes and reduces the .len() of @inp by NUM_BLOCK_BYTES.
+                xor_64!(buf_bytes, inp); // This consumes input bytes and reduces the .len() of @inp by (NUM_BLOCK_BYTES - 8).
+                inp = &inp[8..];
             }
             let buf_bytes = unsafe {
                 std::slice::from_raw_parts(

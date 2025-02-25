@@ -2,8 +2,8 @@ use crate::tf512;
 use crate::ubi512;
 use crate::skein512;
 
-use ssc::op::{SSC_secureZero, secure_zero, c_void};
-use ssc::rand::get_entropy;
+use rssc::op::{SSC_secureZero, secure_zero, c_void};
+use rssc::rand::get_entropy;
 use skein512::Skein512;
 use skein512::{NUM_HASH_BYTES, NUM_HASH_WORDS};
 

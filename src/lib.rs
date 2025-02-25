@@ -9,7 +9,7 @@ pub mod skein512;
 pub mod csprng;
 pub mod rand;
 pub mod catena512;
-extern crate ssc;
+extern crate rssc;
 
 #[cfg(test)]
 mod tests {
