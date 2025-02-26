@@ -373,7 +373,7 @@ impl Catena {
         phi[idx!(1)..idx!(2)].copy_from_slice(&graph_memory[idx!(j              )..idx!(j + 1              )]);
         hash_native!(ubi, &mut graph_memory[..idx!(1)], &phi[..idx!(2)]);
         for i in 1u64..=last_word_index {
-            j = u64::from_le_bytes(graph_memory[idx!(i - 1)..idx!(i)].try_into().unwrap());
+            j = u64::from_le_bytes(graph_memory[idx!(i - 1)..idx!(i - 1) + 8].try_into().unwrap());
             j >>= rshift;
             phi[idx!(0)..idx!(1)].copy_from_slice(&graph_memory[idx!(i - 1)..idx!(i    )]);
             phi[idx!(1)..idx!(2)].copy_from_slice(&graph_memory[idx!(j    )..idx!(j + 1)]);
