@@ -4,8 +4,8 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-#rssc = { git  = "https://github.com/stuartcalder/rssc.git" }
-rssc  = { path = "../rssc" }
+rssc = { git  = "https://github.com/stuartcalder/rssc.git" }
+#rssc  = { path = "../rssc" }
 
 [lib]
 name = "tsc"
