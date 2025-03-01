@@ -638,7 +638,7 @@ impl Threefish512Ctr {
             let off = unsafe {
                 std::slice::from_raw_parts_mut(
                     (&mut self.buffer as *mut _ as *mut u8).offset(offset as isize),
-                    std::mem::size_of::<u64>() * (self.buffer.len() - offset)
+                    (std::mem::size_of::<u64>() * self.buffer.len()) - offset
                 )
             };
             let left = if io.len() >= bytes {
@@ -701,7 +701,7 @@ impl Threefish512Ctr {
             let off = unsafe {
                 std::slice::from_raw_parts_mut(
                     (&mut self.buffer as *mut _ as *mut u8).offset(offset as isize),
-                    std::mem::size_of::<u64>() * (self.buffer.len() - offset)
+                    (std::mem::size_of::<u64>() * self.buffer.len()) - offset
                 )
             };
             let left = if inp.len() >= bytes {
