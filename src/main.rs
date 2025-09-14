@@ -22,7 +22,7 @@ use tsc::catena512;
 
 fn main() {
     use catena512::*;
-    let mut catena = Catena::new(13u8);
+    let mut catena = Catena::new(13u8).unwrap();
     let mut output = [0u8; 64];
     let pw         = [b'p', b'a', b's', b's', b'w', b'o', b'r', b'd'];
 

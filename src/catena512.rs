@@ -105,13 +105,21 @@ pub const NUM_X_BYTES: usize = NUM_X_WORDS * 8;
 pub const NUM_HASH_INPUT_WORDS: usize = NUM_HASH_WORDS * 2;
 pub const NUM_HASH_INPUT_BYTES: usize = NUM_HASH_INPUT_WORDS * 8;
 
-pub const ERR_PW_TOO_LARGE: i32 = 1;
+pub const ERR_PW_TOO_LARGE:  i32 = 1;
+pub const ERR_ALLOC_FAIL:    i32 = 2;
+pub const ERR_ALREADY_INIT:  i32 = 3;
 
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct Gamma {
     buffer: [u8; NUM_GAMMA_BUFFER_BYTES],
     rng:    [u8; NUM_RNG_BYTES],
+}
+
+impl Default for Gamma {
+    fn default() -> Self {
+        unsafe { std::mem::zeroed() }
+    }
 }
 
 #[repr(C)]
@@ -124,6 +132,12 @@ pub union Temp {
     catena:        [u8; NUM_CATENA_BYTES],
 }
 
+impl Default for Temp {
+    fn default() -> Self {
+        unsafe { std::mem::zeroed() }
+    }
+}
+
 #[repr(C)]
 pub struct Catena {
     pub skein512:     Skein512,
@@ -134,28 +148,65 @@ pub struct Catena {
     pub g_high:       u8,
 }
 
+impl Default for Catena {
+    fn default() -> Self {
+        Self {
+            skein512: Skein512::default(),
+            graph_memory: std::ptr::null_mut(),
+            x: unsafe { std::mem::zeroed() },
+            temp: Temp::default(),
+            salt: unsafe { std::mem::zeroed() },
+            g_high: 0u8,
+        }
+    }
+}
+
 impl Catena {
     // PUBLIC INTERFACE.
-    pub fn get_num_allocated_bytes(&self) -> usize {
-        1usize << {self.g_high + 6}
+    pub fn is_initialized(&self) -> bool {
+        ! self.graph_memory.is_null()
     }
-    pub fn new_in_place(&mut self, g_high: u8) {
+    pub fn get_num_allocated_bytes(&self) -> usize {
+        if self.is_initialized() {
+            1usize << {self.g_high + 6}
+        } else {
+            0usize
+        }
+    }
+    pub fn new_in_place(&mut self, g_high: u8) -> Result<(), i32> {
+        if self.is_initialized() {
+            return Err(ERR_ALREADY_INIT);
+        }
         let num_allocated_bytes = {1usize << {g_high + 6}};
         let layout = std::alloc::Layout::from_size_align(num_allocated_bytes, NUM_BLOCK_BYTES).unwrap();
+        self.skein512 = Skein512::new();
         self.graph_memory = unsafe {std::alloc::alloc(layout)};
+        if self.graph_memory.is_null() {
+            return Err(ERR_ALLOC_FAIL);
+        }
+        self.x = [0u8; NUM_X_BYTES];
+        self.temp = unsafe { std::mem::zeroed() };
+        self.salt = [0u8; NUM_SALT_BYTES];
         self.g_high = g_high;
+        Ok(())
     }
-    pub fn new(g_high: u8) -> Catena {
+    pub fn new(g_high: u8) -> Result<Catena, i32> {
         let num_allocated_bytes = {1usize << {g_high + 6}};
         let layout = std::alloc::Layout::from_size_align(num_allocated_bytes, NUM_BLOCK_BYTES).unwrap();
         let graph_memory = unsafe {std::alloc::alloc(layout)};
-        Catena {
-            skein512:     Skein512::new(),
-            temp:         unsafe { std::mem::zeroed() },
-            x:            [0u8; NUM_X_BYTES],
-            salt:         [0u8; NUM_SALT_BYTES],
-            graph_memory,
-            g_high
+        if ! graph_memory.is_null() {
+            Ok(
+                Catena {
+                    skein512:     Skein512::new(),
+                    temp:         unsafe { std::mem::zeroed() },
+                    x:            [0u8; NUM_X_BYTES],
+                    salt:         [0u8; NUM_SALT_BYTES],
+                    graph_memory,
+                    g_high
+                }
+            )
+        } else {
+            Err(ERR_ALLOC_FAIL)
         }
     }
     pub fn get(
@@ -386,7 +437,7 @@ impl Catena {
 impl Drop for Catena {
     fn drop(&mut self) {
         let num_allocated_bytes = self.get_num_allocated_bytes();
-        if ! self.graph_memory.is_null() && num_allocated_bytes > 0 {
+        if self.is_initialized() && num_allocated_bytes > 0 {
             {
                 let gm = unsafe {std::slice::from_raw_parts_mut(self.graph_memory, num_allocated_bytes)};
                 rssc::op::secure_zero(gm);

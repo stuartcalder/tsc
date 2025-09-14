@@ -28,6 +28,7 @@ pub const NUM_SEED_BYTES:   usize = ubi512::NUM_HASH_BYTES;
 pub const NUM_BUFFER_BYTES: usize = NUM_SEED_BYTES * 2;
 
 #[repr(C)]
+#[derive(Clone)]
 pub struct Csprng {
     pub skein512: Skein512,
     pub buffer:   [u8; NUM_BUFFER_BYTES],
@@ -86,9 +87,8 @@ impl Csprng {
         self.skein512.hash_native(&mut self.seed, &self.buffer);
         secure_zero(&mut self.buffer);
     }
-    /** Overwrite all the bytes of the slice @output with pseudorandom
-     * output bytes from the Csprng.
-     */
+    /// Overwrite all the bytes of the slice @output with pseudorandom
+    /// output bytes from the Csprng.
     pub fn get_bytes(&mut self, output: &mut[u8])
     {
         if output.len() == 0 {
@@ -108,23 +108,31 @@ impl Csprng {
         out.copy_from_slice(&self.buffer[NUM_SEED_BYTES..end_idx]);
         secure_zero(&mut self.buffer);
     }
+    /// Generate a pseudorandom u64.
+    pub fn get_random_u64(&mut self) -> u64
+    {
+        let mut bytes = [0u8; 8];
+        self.get_bytes(&mut bytes);
+        u64::from_le_bytes(bytes)
+    }
     /// Generate a pseudorandom natural number between 0u64 and @max.
     pub fn get_random_natural_num(&mut self, max: u64) -> u64
     {
-        let num_sections = max + 1;
-        let local_limit  = u64::MAX - (u64::MAX % num_sections);
-        let quanta_per_section = local_limit / num_sections;
-    
-        let mut bytes = [0u8; 8];
-        self.get_bytes(&mut bytes);
-        let rand_u64 = u64::from_le_bytes(bytes);
-        let offset = if rand_u64 < local_limit {
-            let rounded_down = rand_u64 - (rand_u64 % quanta_per_section);
-            rounded_down / quanta_per_section
-        } else {
-            num_sections - 1
-        };
-        offset
+        if max == 0u64 {
+            return 0u64
+        }
+        // r = 2^64 % max, computed without 128-bit math.
+        // In unsigned arithmetic, 0u64.wrapping_sub(max) == 2^64 - max.
+        // Then (2^64 - max) % max == 2^64 % max.
+        let r = (0u64.wrapping_sub(max)) % max;
+        loop {
+            // Accept if x < 2^64 - r. Using 64-bit values: x <= u64::MAX - r.
+            let x = self.get_random_u64();
+            if r == 0 || x <= u64::MAX - r {
+                return x % max;
+            }
+            // Otherwise reject and retry.
+        }
     }
     /// Generate a pseudorandom u64 within the range @range.0 and @range.1
     pub fn get_random_u64_in_range(&mut self, range: (u64, u64)) -> u64

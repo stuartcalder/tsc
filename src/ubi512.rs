@@ -114,7 +114,7 @@ macro_rules! as_bytes_mut {
 }
 
 #[repr(C)]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Default)]
 pub struct Ubi512
 {
     pub threefish512: Threefish512Dynamic,
@@ -128,6 +128,10 @@ const CONFIG_INIT: [u64; NUM_HASH_WORDS] = [
 
 impl Ubi512
 {
+    pub fn new() -> Self {
+        Self::default()
+    }
+    /*
     pub fn new() -> Ubi512 {
         Ubi512 {
             threefish512: Threefish512Dynamic::new(
@@ -137,6 +141,7 @@ impl Ubi512
             msg: [0u64; NUM_HASH_WORDS],
         }
     }
+    */
     pub fn chain_config(
         &mut self,
         num_output_bits: u64)

@@ -468,12 +468,24 @@ pub struct Threefish512Static {
     pub key_schedule: [u64; NUM_STATIC_KEYSCHEDULE_WORDS],
 }
 
+impl Default for Threefish512Static {
+    fn default() -> Self {
+        unsafe { std::mem::zeroed() }
+    }
+}
+
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct Threefish512Dynamic {
     pub state: [u64; NUM_BLOCK_WORDS],
     pub key:   [u64; NUM_KEY_WORDS_WITH_PARITY],
     pub tweak: [u64; NUM_TWEAK_WORDS_WITH_PARITY],
+}
+
+impl Default for Threefish512Dynamic {
+    fn default() -> Self {
+        unsafe { std::mem::zeroed() }
+    }
 }
 
 #[repr(C)]
@@ -484,11 +496,16 @@ pub struct Threefish512Ctr {
     pub buffer:       [u64; NUM_BLOCK_WORDS],
 }
 
+impl Default for Threefish512Ctr {
+    fn default() -> Self {
+        unsafe { std::mem::zeroed() }
+    }
+}
+
 impl Threefish512Static {
     pub fn new(
         key:   &mut [u64],
-        tweak: &mut [u64]
-    ) -> Self
+        tweak: &mut [u64]) -> Self
     {
         debug_assert!(key.len()   == NUM_KEY_WORDS_WITH_PARITY);
         debug_assert!(tweak.len() == NUM_TWEAK_WORDS_WITH_PARITY);
@@ -525,8 +542,7 @@ impl Threefish512Static {
     }
     pub fn encipher_1(
         &mut self,
-        encipher_io: &mut [u64]
-    )
+        encipher_io: &mut [u64])
     {
         self.state.copy_from_slice(encipher_io);
         encrypt_static!(self);
