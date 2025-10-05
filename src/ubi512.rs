@@ -114,11 +114,20 @@ macro_rules! as_bytes_mut {
 }
 
 #[repr(C)]
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy)]
 pub struct Ubi512
 {
     pub threefish512: Threefish512Dynamic,
     pub msg:          [u64; NUM_HASH_WORDS],
+}
+
+impl Default for Ubi512 {
+    fn default() -> Self {
+        Self {
+            threefish512: Threefish512Dynamic::default(),
+            msg:          unsafe {std::mem::zeroed()},
+        }
+    }
 }
 
 const CONFIG_INIT: [u64; NUM_HASH_WORDS] = [

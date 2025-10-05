@@ -123,6 +123,7 @@ impl Default for Gamma {
 }
 
 #[repr(C)]
+#[derive(Clone, Copy)]
 pub union Temp {
     gamma:         Gamma,
     flap:          [u8; NUM_FLAP_BYTES],
@@ -139,6 +140,7 @@ impl Default for Temp {
 }
 
 #[repr(C)]
+#[derive(Clone)]
 pub struct Catena {
     pub skein512:     Skein512,
     pub graph_memory: *mut u8,
@@ -185,7 +187,7 @@ impl Catena {
             return Err(ERR_ALLOC_FAIL);
         }
         self.x = [0u8; NUM_X_BYTES];
-        self.temp = unsafe { std::mem::zeroed() };
+        self.temp = Temp::default();
         self.salt = [0u8; NUM_SALT_BYTES];
         self.g_high = g_high;
         Ok(())
@@ -198,7 +200,7 @@ impl Catena {
             Ok(
                 Catena {
                     skein512:     Skein512::new(),
-                    temp:         unsafe { std::mem::zeroed() },
+                    temp:         Temp::default(),
                     x:            [0u8; NUM_X_BYTES],
                     salt:         [0u8; NUM_SALT_BYTES],
                     graph_memory,
@@ -445,6 +447,8 @@ impl Drop for Catena {
             let layout = std::alloc::Layout::from_size_align(num_allocated_bytes, NUM_BLOCK_BYTES).unwrap();
             unsafe {std::alloc::dealloc(self.graph_memory, layout)}
         }
+        let m = unsafe {std::slice::from_raw_parts_mut(self as *mut _ as *mut u8, std::mem::size_of::<Self>())};
+        rssc::op::secure_zero(m);
     }
 }
 

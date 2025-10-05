@@ -26,7 +26,7 @@ pub mod skein512;
 pub mod csprng;
 pub mod rand;
 pub mod catena512;
-//pub mod kdf;
+pub mod kdf;
 extern crate rssc;
 
 #[cfg(test)]
