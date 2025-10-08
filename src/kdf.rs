@@ -18,6 +18,8 @@
 #![allow(unused_imports)]
 use std::slice;
 use std::thread;
+use std::cmp::min;
+use std::sync::atomic::{AtomicI32, Ordering};
 use crate::tf512;
 use crate::catena512;
 use crate::skein512;
@@ -89,81 +91,107 @@ pub fn multi_threaded(
     iterations: u8,
     use_phi: bool,
 ) -> Result<(), i32> {
-    const HASH_BUFFER_SIZE: usize = NUM_OUTPUT_BYTES * 2;
-    // Per-thread state and outputs: one block per thread.
-    let mut catenas:     Vec<Catena> = vec![Catena::default(); thread_count as usize];
-    let mut errors:      Vec<i32> = vec![0i32; thread_count as usize];
-    let mut outputs:     Vec<[u8; NUM_BLOCK_BYTES]> = vec![[0u8; NUM_BLOCK_BYTES]; thread_count as usize];
+    let thread_count = thread_count as usize;
+    let thread_batch_size = thread_batch_size as usize;
+    if thread_count == 0 {
+        return Err(-1);
+    }
 
-    // Spawn threads in batches, borrowing each thread's Catena and output in place.
+    let mut catenas: Vec<Catena> = vec![Catena::default(); thread_count];
+    let mut outputs: Vec<[u8; NUM_BLOCK_BYTES]> = vec![[0u8; NUM_BLOCK_BYTES]; thread_count];
+    let mut errors: Vec<i32> = vec![0i32; thread_count];
+
+    // Use a scope so closures may borrow input_salt and input_password
     thread::scope(|s| {
-        let mut i = 0usize;
-        while i < thread_count as usize {
-            let j_stop = if i + {thread_batch_size as usize} < {thread_count as usize} {
-                thread_batch_size as usize
-            } else {
-                thread_count as usize - 1
-            };
-            let start = i;
-            let end = i + j_stop;
-    
-            let out_batch = &mut outputs[start..end];
-            let cat_batch = &mut catenas[start..end];
-            let err_batch = &mut errors[start..end];
-    
-            let mut handles = Vec::with_capacity(j_stop);
-            for (j, out_slot) in out_batch.iter_mut().enumerate() {
-                let cat_slot = &mut cat_batch[j];
-                let err_slot = &mut err_batch[j];
-                let input_salt = input_salt; // copy or reference as appropriate
-                let input_password = input_password;
-    
-                handles.push(s.spawn(move || {
-                    let thread_idx = (start + j) as u64;
-                    match one_thread(
-                        out_slot,
-                        cat_slot,
-                        input_salt,
-                        input_password,
-                        thread_idx,
-                        memory_low,
-                        memory_high,
-                        iterations,
-                        use_phi,
-                    ) {
-                        Ok(()) => *err_slot = 0,
-                        Err(code) => *err_slot = code,
-                    }
-                }));
-            }
-    
-            for h in handles {
-                h.join().unwrap();
-            }
-    
-            i = end;
-        }
-    });
+        let mut start = 0usize;
+        while start < thread_count {
+            let end = min(start + thread_batch_size, thread_count);
+            let batch_len = end - start;
+            if batch_len == 0 { break; }
 
-    // If any thread failed, return a global error (match C++ behavior).
+            // Collect handles for this batch
+            let mut handles = Vec::with_capacity(batch_len);
+            for idx in start..end {
+                // move per-slot data out with replace (arrays don't need Default)
+                let out_placeholder = [0u8; NUM_BLOCK_BYTES];
+                let out_slot = std::mem::replace(&mut outputs[idx], out_placeholder);
+
+                // Catena: requires Default so we can replace
+                let cat_slot = std::mem::replace(&mut catenas[idx], Catena::default());
+
+                // capture non-'static references by borrowing under the scope
+                let salt_ref = input_salt;
+                let pwd_ref = input_password;
+                let mem_low = memory_low;
+                let mem_high = memory_high;
+                let iters = iterations;
+                let phi = use_phi;
+                let thread_idx = idx as u64;
+
+                // spawn scoped thread
+                handles.push((idx, s.spawn(move || {
+                    let mut out_slot = out_slot;
+                    let mut cat_slot = cat_slot;
+                    let res = one_thread(
+                        &mut out_slot,
+                        &mut cat_slot,
+                        salt_ref,
+                        pwd_ref,
+                        thread_idx,
+                        mem_low,
+                        mem_high,
+                        iters,
+                        phi,
+                    );
+                    (res, out_slot, cat_slot)
+                })));
+            }
+
+            // join batch and reinsert results
+            for (idx, handle) in handles {
+                match handle.join() {
+                    Ok((res, thread_out, thread_cat)) => {
+                        match res {
+                            Ok(()) => errors[idx] = 0,
+                            Err(code) => errors[idx] = code,
+                        }
+                        outputs[idx] = thread_out;
+                        catenas[idx] = thread_cat;
+                    }
+                    Err(_) => {
+                        // thread panicked: best-effort zeroize and propagate error
+                        for k in start..end {
+                            rssc::op::secure_zero(&mut outputs[k]);
+                        }
+                        // we cannot return from inside the scope easily; store error and break
+                        errors[idx] = -2;
+                    }
+                }
+            }
+
+            start = end;
+        }
+    }); // end scope; all scoped threads have been joined here
+
+    // if any thread failed, zeroize and return its code
     if let Some(&code) = errors.iter().find(|&&e| e != 0) {
-        // Best-effort zeroization of sensitive buffers before returning error.
         for block in &mut outputs {
             rssc::op::secure_zero(block);
         }
         return Err(code);
     }
 
-    // XOR-reduce all per-thread blocks into outputs[0], like the C++ combination step.
-    for i in 1..(thread_count as usize) {
+    // XOR-reduce into outputs[0]
+    for i in 1..thread_count {
         for b in 0..NUM_BLOCK_BYTES {
             outputs[0][b] ^= outputs[i][b];
         }
     }
 
-    // Write the reduced block to the caller-provided `output`.
-    output.copy_from_slice(&outputs[0]);
+    // Copy only requested number of bytes (slice if sizes differ)
+    output.copy_from_slice(&outputs[0][..NUM_OUTPUT_BYTES]);
 
+    // Zeroize temporary buffers
     for block in &mut outputs {
         rssc::op::secure_zero(block);
     }

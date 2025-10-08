@@ -149,6 +149,15 @@ pub struct Catena {
     pub salt:         [u8; NUM_SALT_BYTES],
     pub g_high:       u8,
 }
+// SAFETY: @Catena is Send because the following conditions hold:
+//  - The @graph_memory pointer is owned by this Catena instance (not shared with other owners).
+//  - While Catena is moved between threads, no other thread will concurrently access the same
+//    @graph_memory
+//    except through this Catena instance (i.e., exclusive ownership per instance).
+//  - The memory @graph_memory points to remains valid for the lifetime of the Catena instance
+//    and will not be freed from another thread while being used.
+//  - Any required synchronization for concurrent access is performed externally.
+unsafe impl Send for Catena {}
 
 impl Default for Catena {
     fn default() -> Self {
@@ -162,17 +171,6 @@ impl Default for Catena {
         }
     }
 }
-
-
-// SAFETY: @Catena is Send because the following conditions hold:
-//  - The @graph_memory pointer is owned by this Catena instance (not shared with other owners).
-//  - While Catena is moved between threads, no other thread will concurrently access the same
-//    @graph_memory
-//    except through this Catena instance (i.e., exclusive ownership per instance).
-//  - The memory @graph_memory points to remains valid for the lifetime of the Catena instance
-//    and will not be freed from another thread while being used.
-//  - Any required synchronization for concurrent access is performed externally.
-unsafe impl Send for Catena {}
 
 impl Catena {
     // PUBLIC INTERFACE.
