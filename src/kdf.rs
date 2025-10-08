@@ -54,7 +54,6 @@ fn one_thread(
     const NUM_INPUT_BYTES: usize = NUM_SALT_BYTES + std::mem::size_of::<u64>();
 
     let mut input:    [u8; NUM_INPUT_BYTES] = [0u8; NUM_INPUT_BYTES];
-    let mut new_salt: [u8; NUM_SALT_BYTES]  = [0u8; NUM_SALT_BYTES];
 
     // Initialize Catena.
     catena.new_in_place(memory_high).unwrap();
@@ -65,7 +64,7 @@ fn one_thread(
     // Copy that version into the last 8 bytes of @input.
     input[NUM_SALT_BYTES..NUM_INPUT_BYTES].copy_from_slice(unsafe {
         std::slice::from_raw_parts(
-            (&mut ti as *mut _ as *mut u8), std::mem::size_of::<u64>()
+            &mut ti as *mut _ as *mut u8, std::mem::size_of::<u64>()
         )
     });
     // Hash @input directly into @catena's salt buffer.
@@ -92,62 +91,58 @@ pub fn multi_threaded(
 ) -> Result<(), i32> {
     const HASH_BUFFER_SIZE: usize = NUM_OUTPUT_BYTES * 2;
     // Per-thread state and outputs: one block per thread.
-    let mut hash_buffer: [u8; HASH_BUFFER_SIZE] = [0u8; HASH_BUFFER_SIZE];
     let mut catenas:     Vec<Catena> = vec![Catena::default(); thread_count as usize];
     let mut errors:      Vec<i32> = vec![0i32; thread_count as usize];
     let mut outputs:     Vec<[u8; NUM_BLOCK_BYTES]> = vec![[0u8; NUM_BLOCK_BYTES]; thread_count as usize];
 
     // Spawn threads in batches, borrowing each thread's Catena and output in place.
-    thread::scope(|scope| {
-        let mut i = 0u64;
-        while i < thread_count {
-            let j_stop = if i + thread_batch_size < thread_count {
-                thread_batch_size
+    thread::scope(|s| {
+        let mut i = 0usize;
+        while i < thread_count as usize {
+            let j_stop = if i + {thread_batch_size as usize} < {thread_count as usize} {
+                thread_batch_size as usize
             } else {
-                thread_count - i
+                thread_count as usize - 1
             };
-
-            // Launch batch
-            let mut handles = Vec::with_capacity(j_stop as usize);
-            for j in 0..j_stop {
-                let offset = (i + j) as usize;
-
-                let out_ptr: *mut [u8; NUM_BLOCK_BYTES] = &mut outputs[offset];
-                let cat_ptr: *mut Catena = &mut catenas[offset];
-                let err_ptr: *mut i32 = &mut errors[offset];
-
-                // Capture only the scalars by copy; borrow per-thread state via raw pointers,
-                // then convert back to &mut inside the thread (safe because batches prevent aliasing).
-                handles.push(scope.spawn(move || {
-                    // SAFETY: Each offset is unique within the batch; no aliasing occurs.
-                    let out = unsafe { &mut *out_ptr };
-                    let cat = unsafe { &mut *cat_ptr };
-                    let err = unsafe { &mut *err_ptr };
-
+            let start = i;
+            let end = i + j_stop;
+    
+            let out_batch = &mut outputs[start..end];
+            let cat_batch = &mut catenas[start..end];
+            let err_batch = &mut errors[start..end];
+    
+            let mut handles = Vec::with_capacity(j_stop);
+            for (j, out_slot) in out_batch.iter_mut().enumerate() {
+                let cat_slot = &mut cat_batch[j];
+                let err_slot = &mut err_batch[j];
+                let input_salt = input_salt; // copy or reference as appropriate
+                let input_password = input_password;
+    
+                handles.push(s.spawn(move || {
+                    let thread_idx = (start + j) as u64;
                     match one_thread(
-                        out,
-                        cat,
+                        out_slot,
+                        cat_slot,
                         input_salt,
                         input_password,
-                        offset as u64,
+                        thread_idx,
                         memory_low,
                         memory_high,
                         iterations,
                         use_phi,
                     ) {
-                        Ok(()) => *err = 0,
-                        Err(code) => *err = code,
+                        Ok(()) => *err_slot = 0,
+                        Err(code) => *err_slot = code,
                     }
                 }));
-            } // END for j in 0..j_stop
-
-            // Join batch
+            }
+    
             for h in handles {
                 h.join().unwrap();
             }
-
-            i += j_stop;
-        } // END while i < thread_count
+    
+            i = end;
+        }
     });
 
     // If any thread failed, return a global error (match C++ behavior).

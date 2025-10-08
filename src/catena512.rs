@@ -163,6 +163,17 @@ impl Default for Catena {
     }
 }
 
+
+// SAFETY: @Catena is Send because the following conditions hold:
+//  - The @graph_memory pointer is owned by this Catena instance (not shared with other owners).
+//  - While Catena is moved between threads, no other thread will concurrently access the same
+//    @graph_memory
+//    except through this Catena instance (i.e., exclusive ownership per instance).
+//  - The memory @graph_memory points to remains valid for the lifetime of the Catena instance
+//    and will not be freed from another thread while being used.
+//  - Any required synchronization for concurrent access is performed externally.
+unsafe impl Send for Catena {}
+
 impl Catena {
     // PUBLIC INTERFACE.
     pub fn is_initialized(&self) -> bool {
@@ -337,8 +348,8 @@ impl Catena {
             );
             i = next;
         }
-        self.gamma(garlic); //TODO: gamma()
-        self.graph_hash(garlic, lambda); //TODO: graph_hash()
+        self.gamma(garlic);
+        self.graph_hash(garlic, lambda);
         if use_phi {
             self.phi(garlic);
         } else {
