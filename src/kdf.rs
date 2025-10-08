@@ -34,11 +34,8 @@ use tf512::{
 use skein512::{
     Skein512
 };
-
-use catena512::{
-    NUM_SALT_BYTES,
-    Catena
-};
+use catena512::Catena;
+pub use catena512::NUM_SALT_BYTES;
 
 pub const NUM_OUTPUT_BYTES: usize = NUM_BLOCK_BYTES;
 
@@ -93,45 +90,34 @@ pub fn multi_threaded(
 ) -> Result<(), i32> {
     let thread_count = thread_count as usize;
     let thread_batch_size = thread_batch_size as usize;
-    if thread_count == 0 {
-        return Err(-1);
-    }
+    if thread_count == 0 { return Err(-1); }
 
     let mut catenas: Vec<Catena> = vec![Catena::default(); thread_count];
     let mut outputs: Vec<[u8; NUM_BLOCK_BYTES]> = vec![[0u8; NUM_BLOCK_BYTES]; thread_count];
     let mut errors: Vec<i32> = vec![0i32; thread_count];
 
-    // Use a scope so closures may borrow input_salt and input_password
-    thread::scope(|s| {
-        let mut start = 0usize;
-        while start < thread_count {
-            let end = min(start + thread_batch_size, thread_count);
-            let batch_len = end - start;
-            if batch_len == 0 { break; }
+    let mut start = 0usize;
+    while start < thread_count {
+        let end = min(start + thread_batch_size, thread_count);
+        if end == start { break; }
 
-            // Collect handles for this batch
-            let mut handles = Vec::with_capacity(batch_len);
-            for idx in start..end {
-                // move per-slot data out with replace (arrays don't need Default)
-                let out_placeholder = [0u8; NUM_BLOCK_BYTES];
-                let out_slot = std::mem::replace(&mut outputs[idx], out_placeholder);
+        // Drain the batch out of parent vectors (moves ownership; no clones)
+        let batch_catenas: Vec<Catena> = catenas.drain(start..end).collect();
+        let batch_outputs: Vec<[u8; NUM_BLOCK_BYTES]> = outputs.drain(start..end).collect();
 
-                // Catena: requires Default so we can replace
-                let cat_slot = std::mem::replace(&mut catenas[idx], Catena::default());
-
-                // capture non-'static references by borrowing under the scope
+        // Spawn scoped threads so they can borrow salt/password
+        thread::scope(|s| {
+            let mut handles = Vec::with_capacity(batch_outputs.len());
+            for (local_idx, (mut out_slot, mut cat_slot)) in batch_outputs.into_iter().zip(batch_catenas.into_iter()).enumerate() {
                 let salt_ref = input_salt;
                 let pwd_ref = input_password;
                 let mem_low = memory_low;
                 let mem_high = memory_high;
                 let iters = iterations;
                 let phi = use_phi;
-                let thread_idx = idx as u64;
+                let thread_idx = (start + local_idx) as u64;
 
-                // spawn scoped thread
-                handles.push((idx, s.spawn(move || {
-                    let mut out_slot = out_slot;
-                    let mut cat_slot = cat_slot;
+                handles.push(s.spawn(move || {
                     let res = one_thread(
                         &mut out_slot,
                         &mut cat_slot,
@@ -143,58 +129,57 @@ pub fn multi_threaded(
                         iters,
                         phi,
                     );
-                    (res, out_slot, cat_slot)
-                })));
+                    (local_idx, res, out_slot, cat_slot)
+                }));
             }
 
-            // join batch and reinsert results
-            for (idx, handle) in handles {
+            // Collect results and put them into temporary vectors for reinsertion
+            let mut returned_outputs = vec![[0u8; NUM_BLOCK_BYTES]; end - start];
+            let mut returned_catenas = vec![Catena::default(); end - start]; // temporary placeholders to be overwritten immediately
+
+            for handle in handles {
                 match handle.join() {
-                    Ok((res, thread_out, thread_cat)) => {
-                        match res {
-                            Ok(()) => errors[idx] = 0,
-                            Err(code) => errors[idx] = code,
-                        }
-                        outputs[idx] = thread_out;
-                        catenas[idx] = thread_cat;
+                    Ok((local_idx, res, out_slot, cat_slot)) => {
+                        returned_outputs[local_idx] = out_slot;
+                        returned_catenas[local_idx] = cat_slot;
+                        errors[start + local_idx] = res.map(|()| 0).unwrap_or_else(|c| c);
                     }
                     Err(_) => {
-                        // thread panicked: best-effort zeroize and propagate error
-                        for k in start..end {
-                            rssc::op::secure_zero(&mut outputs[k]);
-                        }
-                        // we cannot return from inside the scope easily; store error and break
-                        errors[idx] = -2;
+                        // thread panicked: zeroize whatever we can and mark error
+                        for block in &mut returned_outputs { rssc::op::secure_zero(block); }
+                        return; // scoped threads are joined; break out to outer flow to handle error
                     }
                 }
             }
 
-            start = end;
-        }
-    }); // end scope; all scoped threads have been joined here
+            // Reinsert returned items into parent vectors at positions start..end
+            // Use extend + splice to preserve ordering
+            outputs.splice(start..start, returned_outputs.into_iter());
+            catenas.splice(start..start, returned_catenas.into_iter());
+        });
 
-    // if any thread failed, zeroize and return its code
+        start = end;
+    }
+
+    // If any thread failed, zeroize and return first non-zero code
     if let Some(&code) = errors.iter().find(|&&e| e != 0) {
+        // zeroize outputs
         for block in &mut outputs {
             rssc::op::secure_zero(block);
         }
         return Err(code);
     }
 
-    // XOR-reduce into outputs[0]
+    // Combine and copy out
     for i in 1..thread_count {
         for b in 0..NUM_BLOCK_BYTES {
             outputs[0][b] ^= outputs[i][b];
         }
     }
-
-    // Copy only requested number of bytes (slice if sizes differ)
     output.copy_from_slice(&outputs[0][..NUM_OUTPUT_BYTES]);
 
-    // Zeroize temporary buffers
-    for block in &mut outputs {
-        rssc::op::secure_zero(block);
-    }
+    // Zeroize temporaries
+    for block in &mut outputs { rssc::op::secure_zero(block); }
 
     Ok(())
 }

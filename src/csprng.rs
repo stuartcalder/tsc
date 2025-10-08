@@ -15,7 +15,6 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-use crate::tf512;
 use crate::ubi512;
 use crate::skein512;
 
