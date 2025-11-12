@@ -87,7 +87,8 @@ pub fn multi_threaded(
     memory_high: u8,
     iterations: u8,
     use_phi: bool,
-) -> Result<(), i32> {
+) -> Result<(), i32>
+{
     let thread_count = thread_count as usize;
     let thread_batch_size = thread_batch_size as usize;
     if thread_count == 0 { return Err(-1); }

@@ -86,10 +86,10 @@ impl Skein512 {
         key:    &[u64])
     {
         debug_assert!(key.len()    == tf512::NUM_KEY_WORDS);
-        debug_assert!(output.len() == tf512::NUM_KEY_BYTES);
+        debug_assert!(output.len() == tf512::NUM_KEY_BYTES); //FIXME: It's not strictly necessary that the output be this size.
         self.ubi512.threefish512.key.fill(0u64);
         self.ubi512.chain_key_u64(key);
-        self.ubi512.chain_config({output.len() as u64} * 8);
+        self.ubi512.chain_config({output.len() as u64} * 8u64);
         self.ubi512.chain_message(input);
         self.ubi512.chain_output(output);
     }

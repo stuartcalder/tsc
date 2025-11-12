@@ -15,16 +15,14 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-use std::mem::transmute;
-
 use crate::tf512;
 use tf512::Threefish512Dynamic;
 
 // The first block is being processed.
 pub const TWEAK_FIRST_BIT:  u8 = 0x40u8;
-// The first block has already been Processed.
+// The first block has already been processed.
 pub const TWEAK_FIRST_MASK: u8 = 0xBFu8;
-// The last block is being processeD.
+// The last block is being processed.
 pub const TWEAK_LAST_BIT:   u8 = 0x80u8;
 
 // A key is being processed.
@@ -59,9 +57,9 @@ macro_rules! xor_8_words {
  * then encipher the input message into the Threefish512 key buffer and
  * XOR the plaintext message into the ciphertext in the Threefish512 key buffer.
  */
-macro_rules! rekey_encipher_xor {
+macro_rules! parity_encipher_xor {
     ($ubi:expr) => {
-        $ubi.threefish512.rekey();
+        $ubi.threefish512.compute_parity();
         $ubi.threefish512.encipher_into_key(&$ubi.msg);
         xor_8_words!($ubi.threefish512.key, $ubi.msg);
     }
@@ -140,17 +138,6 @@ impl Ubi512
     pub fn new() -> Self {
         Self::default()
     }
-    /*
-    pub fn new() -> Ubi512 {
-        Ubi512 {
-            threefish512: Threefish512Dynamic::new(
-                [0u64; tf512::NUM_KEY_WORDS_WITH_PARITY],
-                [0u64; tf512::NUM_TWEAK_WORDS_WITH_PARITY]
-            ),
-            msg: [0u64; NUM_HASH_WORDS],
-        }
-    }
-    */
     pub fn chain_config(
         &mut self,
         num_output_bits: u64)
@@ -159,7 +146,7 @@ impl Ubi512
         *get_tweak_position_mut!(self) = 32u64.to_le();
         self.msg = CONFIG_INIT.clone();
         self.msg[1] = num_output_bits.to_le();
-        rekey_encipher_xor!(self);
+        parity_encipher_xor!(self);
     }
     pub fn chain_output_native(
         &mut self,
@@ -170,14 +157,13 @@ impl Ubi512
         initialize_tweak!(self, TWEAK_LAST_BIT | TYPEMASK_OUT);
         *get_tweak_position_mut!(self) = 8u64.to_le();
         self.msg.fill(0u64);
-        rekey_encipher_xor!(self);
+        parity_encipher_xor!(self);
         let key_bytes: &[u8] = as_bytes!(&self.threefish512.key, NUM_HASH_WORDS);
         output.copy_from_slice(key_bytes);
     }
     pub fn chain_message(
         &mut self,
-        input: &[u8]
-    )
+        input: &[u8])
     {
         initialize_tweak!(self, TYPEMASK_MSG);
         if input.len() <= NUM_HASH_BYTES {
@@ -190,7 +176,7 @@ impl Ubi512
                     msg_bytes[input.len()..].fill(0u8);
                 }
             }
-            rekey_encipher_xor!(self);
+            parity_encipher_xor!(self);
             return;
         }
         *get_tweak_position_mut!(self) = {NUM_HASH_BYTES as u64}.to_le();
@@ -198,7 +184,7 @@ impl Ubi512
             let msg_bytes: &mut [u8] = as_bytes_mut!(&mut self.msg, NUM_HASH_WORDS);
             msg_bytes.copy_from_slice(&input[..NUM_HASH_BYTES]);
         }
-        rekey_encipher_xor!(self);
+        parity_encipher_xor!(self);
         *get_tweak_flags_mut!(self) &= TWEAK_FIRST_MASK;
 
         let mut input_idx = NUM_HASH_BYTES as usize;
@@ -209,7 +195,7 @@ impl Ubi512
                 let msg_bytes: &mut [u8] = as_bytes_mut!(&mut self.msg, NUM_HASH_WORDS);
                 msg_bytes.copy_from_slice(&input[input_idx..next_idx]);
             }
-            rekey_encipher_xor!(self);
+            parity_encipher_xor!(self);
             input_idx = next_idx;
         }
         let bytes_remaining = input.len().saturating_sub(input_idx as usize);
@@ -224,24 +210,23 @@ impl Ubi512
                 msg_bytes[bytes_remaining..].fill(0u8);
             }
         }
-        rekey_encipher_xor!(self);
+        parity_encipher_xor!(self);
     }// ~ chain_message()
     pub fn chain_output(
         &mut self,
-        output: &mut [u8]
-    )
+        output: &mut [u8])
     {
         initialize_tweak!(self, TYPEMASK_OUT);
         self.msg.fill(0u64);
         *get_tweak_position_mut!(self) = 8u64;
         if output.len() <= tf512::NUM_KEY_BYTES {
             *get_tweak_flags_mut!(self) |= TWEAK_LAST_BIT;
-            rekey_encipher_xor!(self);
+            parity_encipher_xor!(self);
             let key_bytes: &[u8] = as_bytes!(&self.threefish512.key, tf512::NUM_KEY_WORDS);
             output.copy_from_slice(&key_bytes[..output.len()]);
             return;
         }
-        rekey_encipher_xor!(self);
+        parity_encipher_xor!(self);
         *get_tweak_flags_mut!(self) &= TWEAK_FIRST_MASK;
         {
             let key_bytes: &[u8] = as_bytes!(&self.threefish512.key, tf512::NUM_KEY_WORDS);
@@ -256,7 +241,7 @@ impl Ubi512
             *get_tweak_position_mut!(self) = {
                 u64::from_le(*get_tweak_position_mut!(self)) + {std::mem::size_of::<u64>() as u64}
             }.to_le();
-            rekey_encipher_xor!(self);
+            parity_encipher_xor!(self);
             {
                 let key_bytes: &[u8] = as_bytes!(&self.threefish512.key, tf512::NUM_KEY_WORDS);
                 output[output_idx..next_idx].copy_from_slice(&key_bytes);
@@ -270,7 +255,7 @@ impl Ubi512
         *get_tweak_position_mut!(self) = {
             u64::from_le(*get_tweak_position_mut!(self)) + {std::mem::size_of::<u64>() as u64}
         }.to_le();
-        rekey_encipher_xor!(self);
+        parity_encipher_xor!(self);
         let key_bytes: &[u8] = as_bytes!(&self.threefish512.key, tf512::NUM_KEY_WORDS);
         let bytes_remaining = output.len().saturating_sub(output_idx as usize);
         output[output_idx..].copy_from_slice(&key_bytes[..bytes_remaining]);
@@ -284,7 +269,7 @@ impl Ubi512
         unsafe {
             std::slice::from_raw_parts_mut(&mut self.msg as *mut _ as *mut u8, NUM_HASH_BYTES)
         }.copy_from_slice(key);
-        rekey_encipher_xor!(self);
+        parity_encipher_xor!(self);
     }// ~ chain_key()
     pub fn chain_key_u64(
         &mut self,
@@ -293,6 +278,6 @@ impl Ubi512
         initialize_tweak!(self, TYPEMASK_KEY | TWEAK_LAST_BIT);
         *get_tweak_position_mut!(self) = {tf512::NUM_BLOCK_BYTES as u64}.to_le();
         self.msg.copy_from_slice(&key[..tf512::NUM_KEY_WORDS]);
-        rekey_encipher_xor!(self);
+        parity_encipher_xor!(self);
     }// ~ chain_key()
 }

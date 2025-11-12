@@ -21,7 +21,7 @@ use crate::skein512;
 use rssc::op::{SSC_secureZero, secure_zero, c_void};
 use rssc::rand::get_entropy;
 use skein512::Skein512;
-use skein512::{NUM_HASH_BYTES, NUM_HASH_WORDS};
+use skein512::NUM_HASH_WORDS;
 
 pub const NUM_SEED_BYTES:   usize = ubi512::NUM_HASH_BYTES;
 pub const NUM_BUFFER_BYTES: usize = NUM_SEED_BYTES * 2;
