@@ -16,25 +16,25 @@
 */
 
 #![allow(unused_imports)]
-use crate::tf512::NUM_BLOCK_BYTES;
-use rssc::mmap;
-use rssc::c;
-use rssc::op;
+pub use crate::tf512::NUM_BLOCK_BYTES;
+pub use rssc::mmap;
+pub use rssc::c;
+pub use rssc::op;
+pub use mmap::Map;
 
 use std::mem::ManuallyDrop;
 use std::alloc;
-
 use alloc::Layout;
-use mmap::Map;
+
 
 #[repr(C)]
-pub struct SecureMemAlternate
+struct SecureBufferAlternate
 {
     pub ptr:  *mut u8,
     pub size: usize,
 }
 
-impl Default for SecureMemAlternate {
+impl Default for SecureBufferAlternate {
     fn default() -> Self {
         Self {
             ptr: std::ptr::null_mut(),
@@ -43,9 +43,9 @@ impl Default for SecureMemAlternate {
     }
 }
 
-impl Drop for SecureMemAlternate {
+impl Drop for SecureBufferAlternate {
     fn drop(&mut self) {
-        // If we've allocated procedure with the drop.
+        // If we've allocated proceed with the drop.
         if ! self.ptr.is_null() {
             // Zero over the memory to destroy it.
             unsafe {op::SSC_secureZero(self.ptr as *mut _ as *mut op::c_void, self.size)};
@@ -59,24 +59,38 @@ impl Drop for SecureMemAlternate {
 }
 
 #[repr(C)]
-pub union SecureMemUnion
+union SecureBufferUnion
 {
     pub mem_map: ManuallyDrop<Map>,
-    pub mem_alt: ManuallyDrop<SecureMemAlternate>,
+    pub mem_alt: ManuallyDrop<SecureBufferAlternate>,
 }
 
 pub const TAG_MAP:  u8 = 1u8;
 pub const TAG_ALT:  u8 = 2u8;
 
 #[repr(C)]
-pub struct SecureMem
+pub struct SecureBuffer
 {
-    mem_union: SecureMemUnion,
+    mem_union: SecureBufferUnion,
     tag:       u8,
 }
 
-impl SecureMem {
-    pub fn new_in_place(place: &mut SecureMem, requested_size: usize) -> Result<(),()>
+impl Default for SecureBuffer {
+    fn default() -> Self {
+        // Initialize this as a memory map so Rust stops complaining about it being
+        // uninitialized. This doesn't matter since interactions are controlled by the
+        // tag, which is initialized to 0u8.
+        Self {
+            mem_union: SecureBufferUnion {
+                mem_map: ManuallyDrop::new(Map::default())
+            },
+            tag: 0u8,
+        }
+    }
+}
+
+impl SecureBuffer {
+    pub fn new_in_place(place: &mut SecureBuffer, requested_size: usize) -> Result<(),()>
     {
         if requested_size == 0usize {
             return Err(());
@@ -91,8 +105,8 @@ impl SecureMem {
                 return Ok(())
             }
         }
-        // Reaching this point of the function means we need to try using SecureMemAlternate.
-        let mut sma = SecureMemAlternate {
+        // Reaching this point of the function means we need to try using SecureBufferAlternate.
+        let mut sma = SecureBufferAlternate {
             ptr: std::ptr::null_mut(),
             size: requested_size,
         };
@@ -107,15 +121,7 @@ impl SecureMem {
     }
     pub fn new(requested_size: usize) -> Result<Self,()>
     {
-        let mut sm = SecureMem {
-            // Initialize this as a memory map so Rust stops complaining about it being
-            // uninitialized. This doesn't matter since interactions are controlled by the
-            // tag, which is initialized to 0u8.
-            mem_union: SecureMemUnion {
-                mem_map: ManuallyDrop::new(Map::default())
-            },
-            tag: 0u8,
-        };
+        let mut sm = SecureBuffer::default();
         Self::new_in_place(&mut sm, requested_size)?;
         Ok(sm)
     }
@@ -141,7 +147,7 @@ impl SecureMem {
             _ => Err(())
         }
     }
-    pub fn get_mem(&mut self) -> Result<&mut [u8], ()>
+    pub fn get_slice(&mut self) -> Result<&mut [u8], ()>
     {
         match self.tag {
             TAG_MAP => {
@@ -204,7 +210,7 @@ impl SecureMem {
                 map.resize(new_size)?;
             },
             TAG_ALT => {
-                // Get a mutable reference to the SecureMemAlternate.
+                // Get a mutable reference to the SecureBufferAlternate.
                 let alt = unsafe {
                     &mut *self.mem_union.mem_alt
                 };
@@ -221,26 +227,34 @@ impl SecureMem {
                 }
                 // Form a slice that references the newly allocated memory.
                 let p_slice = unsafe {std::slice::from_raw_parts_mut(p, new_size)};
-                // Get a mutable reference to the SecureMemAlternate's allocated memory that we're
+                // Get a mutable reference to the SecureBufferAlternate's allocated memory that we're
                 // resizing.
-                let alt_mem_res = self.get_mem();
-                if alt_mem_res.is_err() {
+                let alt_slice_res = self.get_slice();
+                if alt_slice_res.is_err() {
                     return Err(());
                 }
-                let alt_mem = alt_mem_res.unwrap();
+                let alt_slice = alt_slice_res.unwrap();
                 // Is it growing in size?
                 if new_size > alt_size {
                     // We need to ensure the new bytes are initially zero.
                     p_slice[alt_size..].fill(0u8);
                 }
+                let copy_size = if new_size > alt_size {
+                    // The new allocation is larger. Room left over after copying.
+                    alt_size
+                } else {
+                    // The new allocation is less than or equal to the original. Some data is not
+                    // going to get copied over.
+                    new_size
+                };
                 // Copy the data into the newly allocated memory.
-                p_slice[..alt_size].copy_from_slice(alt_mem);
+                p_slice[..copy_size].copy_from_slice(&alt_slice[..copy_size]);
                 unsafe {
                     // Drop the original.
                     ManuallyDrop::drop(&mut self.mem_union.mem_alt);
                     // Create the replacement.
                     self.mem_union.mem_alt = ManuallyDrop::new(
-                        SecureMemAlternate {
+                        SecureBufferAlternate {
                             ptr: p, size: new_size
                         }
                     );
@@ -256,7 +270,7 @@ impl SecureMem {
     }
 }
 
-impl Drop for SecureMem {
+impl Drop for SecureBuffer {
     fn drop(&mut self) {
         match self.tag {
             TAG_MAP => {

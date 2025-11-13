@@ -27,7 +27,7 @@ pub mod csprng;
 pub mod rand;
 pub mod catena512;
 pub mod kdf;
-pub mod secure_mem;
+pub mod secure_buffer;
 extern crate rssc;
 
 #[cfg(test)]
