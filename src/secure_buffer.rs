@@ -28,7 +28,7 @@ use alloc::Layout;
 
 
 #[repr(C)]
-struct SecureBufferAlternate
+pub struct SecureBufferAlternate
 {
     pub ptr:  *mut u8,
     pub size: usize,
@@ -59,7 +59,7 @@ impl Drop for SecureBufferAlternate {
 }
 
 #[repr(C)]
-union SecureBufferUnion
+pub union SecureBufferUnion
 {
     pub mem_map: ManuallyDrop<Map>,
     pub mem_alt: ManuallyDrop<SecureBufferAlternate>,
@@ -89,11 +89,34 @@ impl Default for SecureBuffer {
     }
 }
 
+impl Drop for SecureBuffer {
+    fn drop(&mut self) {
+        self.nullify();
+    }
+}
+
 impl SecureBuffer {
+    pub fn nullify(&mut self)
+    {
+        match self.tag {
+            TAG_MAP => {
+                unsafe { ManuallyDrop::drop(&mut self.mem_union.mem_map); }
+            },
+            TAG_ALT => {
+                unsafe { ManuallyDrop::drop(&mut self.mem_union.mem_alt); }
+            },
+            /* An uninitialized SecureBuffer does nothing during a nullify(). */
+            _ => {}
+        }
+        *self = Self::default();
+    }
     pub fn new_in_place(place: &mut SecureBuffer, requested_size: usize) -> Result<(),()>
     {
         if requested_size == 0usize {
             return Err(());
+        }
+        if place.is_initialized() {
+            place.nullify();
         }
         // Does our MemMap implementation support secret maps?
         if mmap::HAS_INITSECRET {
@@ -121,7 +144,7 @@ impl SecureBuffer {
     }
     pub fn new(requested_size: usize) -> Result<Self,()>
     {
-        let mut sm = SecureBuffer::default();
+        let mut sm = Self::default();
         Self::new_in_place(&mut sm, requested_size)?;
         Ok(sm)
     }
@@ -174,9 +197,7 @@ impl SecureBuffer {
                 };
                 Ok(m)
             },
-            _ => {
-                Err(())
-            }
+            _ => Err(())
         }
     }
     pub fn get_size(&self) -> Result<usize, ()>
@@ -234,17 +255,14 @@ impl SecureBuffer {
                     return Err(());
                 }
                 let alt_slice = alt_slice_res.unwrap();
-                // Is it growing in size?
-                if new_size > alt_size {
+                let copy_size = if new_size > alt_size {
                     // We need to ensure the new bytes are initially zero.
                     p_slice[alt_size..].fill(0u8);
-                }
-                let copy_size = if new_size > alt_size {
                     // The new allocation is larger. Room left over after copying.
                     alt_size
                 } else {
-                    // The new allocation is less than or equal to the original. Some data is not
-                    // going to get copied over.
+                    // The new allocation is less than or equal to the original. Some data may not
+                    // get copied over.
                     new_size
                 };
                 // Copy the data into the newly allocated memory.
@@ -267,23 +285,5 @@ impl SecureBuffer {
     pub fn get_tag(&self) -> u8
     {
         self.tag
-    }
-}
-
-impl Drop for SecureBuffer {
-    fn drop(&mut self) {
-        match self.tag {
-            TAG_MAP => {
-                unsafe {
-                    ManuallyDrop::drop(&mut self.mem_union.mem_map);
-                }
-            },
-            TAG_ALT => {
-                unsafe {
-                    ManuallyDrop::drop(&mut self.mem_union.mem_alt);
-                }
-            },
-            _ => {}
-        }
     }
 }

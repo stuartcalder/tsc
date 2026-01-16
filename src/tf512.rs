@@ -42,6 +42,12 @@ pub const CONST_240: u64 = 0x1BD11BDAA9FC1A22u64.to_le();
 pub const NUM_CTR_IV_BYTES: usize = 32;
 pub const NUM_CTR_IV_WORDS: usize = 4;
 
+pub const OCBT_DOMAIN_AD_CRYPT: u64      = 0b00u64; /// Ciphering the additional data.
+pub const OCBT_DOMAIN_AD_FINALIZE: u64   = 0b01u64; /// Ciphering the final additional data block.
+pub const OCBT_DOMAIN_DATA_CRYPT: u64    = 0b10u64; /// Ciphering the payload.
+pub const OCBT_DOMAIN_DATA_FINALIZE: u64 = 0b11u64; /// Ciphering the final payload block.
+pub const OCBT_DOMAIN_MASK: u64          = 0xfffffffffffffff3u64; /// All bits EXCEPT the domain bits.
+
 macro_rules! store_word {
     ($key_schedule:expr,
      $key_words:expr,
@@ -855,5 +861,202 @@ impl Threefish512CtrDynamic {
         keystream_start: u64)
     {
         ctr_xor_2!(self, output, input, keystream_start);
+    }
+}
+
+#[repr(C)]
+pub struct Threefish512Ocbt {
+    /// 62-bit message nonce (upper 2 bits unused).
+    pub nonce: u64,
+    /// AD/Payload block counter (used in the tweak).
+    pub block_counter: u64,
+    /// The underlying Threefish512 instance; dynamically calculated key-schedule.
+    pub tf: Threefish512Dynamic,
+    /// Accumulator for associated data (512 bits).
+    pub ad_acc: [u64; NUM_BLOCK_WORDS],
+    /// Accumulator for payload data (512 bits).
+    pub data_acc: [u64; NUM_BLOCK_WORDS],
+}
+
+enum OcbtFinalBlock {
+    Whole(&[u64; NUM_BLOCK_WORDS]),
+    Partial(&[u8]),
+}
+
+impl Threefish512Ocbt {
+    /// Create a new OCB-T instance with a 512-bit key and a 62-bit nonce.
+    pub fn new(key: &[u64; NUM_KEY_WORDS], nonce: u64) -> Self {
+        let mut tweak = [0u64; NUM_TWEAK_WORDS_WITH_PARITY];
+
+        // The two domain bits are initially zero.
+        tweak[0] = nonce << 2;
+        // tweak[1] (the block counter) is already initialized to zero.
+
+        let mut tf = Threefish512Dynamic::new(*key, tweak);
+
+        Self {
+            nonce,
+            block_counter: 0u64,
+            tf,
+            ad_acc:   [0u64; NUM_BLOCK_WORDS],
+            data_acc: [0u64; NUM_BLOCK_WORDS],
+        }
+    }
+
+    #[inline]
+    fn set_tweak(&mut self, domain: u64, counter: u64) {
+        // domain: low 2 bits of tweak[0]
+        // nonce:  stored in self.nonce
+        // counter: stored in tweak[1]
+
+        let t0 = (self.nonce << 2) | (domain & 0x3);
+        let t1 = counter;
+
+        self.tf.tweak[0] = t0.to_le();
+        self.tf.tweak[1] = t1.to_le();
+
+        // Recompute the tweak parity word.
+        compute_tweak_parity_word(&mut self.tf.tweak);
+    }
+
+    fn process_ad_block_full(
+        &mut self,
+        tmp: &mut [u64; NUM_BLOCK_WORDS],
+        block: &[u64; NUM_BLOCK_WORDS])
+    {
+        self.set_tweak(OCBT_DOMAIN_AD_CRYPT, self.block_counter);
+        self.tf.encipher_2(tmp, block);
+        for i in 0usize..NUM_BLOCK_WORDS {
+            self.ad_acc[i] ^= tmp[i];
+        }
+        self.block_counter += 1;
+    }
+
+    fn process_ad_block_final(
+        &mut self,
+        tmp: &mut [u64; NUM_BLOCK_WORDS],
+        finalblk: OcbtFinalBlock)
+    {
+        // Set the tweak for AD finalization.
+        self.set_tweak(OCBT_DOMAIN_AD_FINALIZE, self.block_counter);
+        match finalblk {
+            OcbtFinalBlock::Whole(whole) => {
+                self.tf.encipher_2(tmp, whole);
+                for i in 0usize..NUM_BLOCK_WORDS {
+                    self.ad_acc[i] ^= tmp[i];
+                }
+                self.block_counter += 1;
+            },
+            OcbtFinalBlock::Partial(partial) => {
+                let tmp_bytes: &mut [u8; NUM_BLOCK_BYTES] = unsafe {
+                    &mut *(tmp as *mut [u64; NUM_BLOCK_WORDS] as *mut [u8; NUM_BLOCK_BYTES])
+                };
+                // 1. Copy the partial bytes directly into tmp_bytes.
+                let plen = partial.len();
+                tmp_bytes[..plen].copy_from_slice(partial);
+                // 2. Append 0x80.
+                tmp_bytes[plen] = 0x80u8;
+                // 3. Zero-pad the remainder.
+                for b in &mut tmp_bytes[plen+1..] {
+                    *b= 0u8;
+                }
+                // 4. Run Threefish512 on the padded block
+                self.tf.encipher_1(tmp);
+                // 5. XOR into AD accumulator.
+                for i in 0usize..NUM_BLOCK_WORDS {
+                    self.ad_acc[i] ^= tmp[i];
+                }
+                // 6. Increment block counter.
+                self.block_counter += 1;
+            },
+        }
+    }
+
+    fn encrypt_full_block(
+        &mut self,
+        block_out: &mut [u64; NUM_BLOCK_WORDS],
+        block_in: &[u64; NUM_BLOCK_WORDS])
+    {
+        // 1. Set the tweak for enciphering payload.
+        self.set_tweak(OCBT_DOMAIN_DATA_CRYPT, self.block_counter);
+        // 2. Encrypt the plaintext block.
+        self.tf.encipher_2(block_out, block_in);
+        // 3. Update the data accumulator using the plaintext for authentication.
+        for i in 0usize..NUM_BLOCK_WORDS {
+            self.data_acc[i] ^= block_in[i];
+        }
+        // 4. Increment the unified block counter.
+        self.block_counter += 1;
+    }
+
+    fn encrypt_final_block(
+        &mut self,
+        block_out: &mut [u64; NUM_BLOCK_WORDS],
+        tmp:       &mut [u64; NUM_BLOCK_WORDS],
+        final_in:  OcbtFinalBlock)
+    {
+        self.set_tweak(OCBT_DOMAIN_DATA_FINALIZE, self.block_counter);
+        match final_in {
+            OcbtFinalBlock::Whole(whole) => {
+                // 1. Encrypt the plaintext.
+                self.tf.encipher_2(block_out, whole);
+                // 2. Update the data accumulator using the plaintext for authentication.
+                for i in 0usize..NUM_BLOCK_WORDS {
+                    self.data_acc[i] ^= whole[i];
+                }
+                // 3. Increment the unified block counter.
+                self.block_counter += 1;
+            },
+            OcbtFinalBlock::Partial(partial) => {
+                let plen = partial.len();
+                // 1. Build padded plaintext in @tmp.
+                {
+                    let padded_bytes: &mut [u8; NUM_BLOCK_BYTES] = unsafe {
+                        &mut *(tmp as *mut [u64; NUM_BLOCK_WORDS] as *mut [u8; NUM_BLOCK_BYTES])
+                    };
+                    padded_bytes[..plen].copy_from_slice(partial);
+                    padded_bytes[plen] = 0x80u8;
+                    for b in &mut padded_bytes[plen + 1 ..] {
+                        *b = 0u8;
+                    }
+                }
+
+                // 2. Update data accumulator with padded plaintext (authentication).
+                for i in 0usize..NUM_BLOCK_WORDS {
+                    self.data_acc[i] ^= tmp[i];
+                }
+
+                // 3. Set tweak for DATA_FINALIZE and encrypt the padded plaintext in place.
+                self.tf.encipher_1(&mut tmp);
+
+                // 4. Ciphertext is the first @plen bytes of the encrypted padded block,
+                //    so copy only those bytes into @block_out; the rest is unspecified.
+                let enc_bytes: &[u8; NUM_BLOCK_BYTES] = unsafe {
+                    &*(tmp as *const [u64; NUM_BLOCK_WORDS] as *const [u8; NUM_BLOCK_BYTES])
+                };
+                let out_bytes: &mut [u8; NUM_BLOCK_BYTES] = unsafe {
+                    &mut *(block_out as *mut [u64; NUM_BLOCK_WORDS] as *mut [u8; NUM_BLOCK_BYTES])
+                };
+                out_bytes[..plen].copy_from_slice(&enc_bytes[..plen]);
+
+                // 5. Increment unified block counter.
+                self.block_counter += 1;
+            },
+        }
+    }
+
+    fn encrypt_partial_block(&mut self, tmp: &mut [u64; NUM_BLOCK_WORDS], finalblk: OcbtFinalBlock) {
+        match finalblk {
+            OcbtFinalBlock::Whole(whole) => {
+            },
+            OcbtFinalBlock::Partial(partial) => {
+            },
+        }
+        //TODO: Implement.
+    }
+
+    //TODO: Define parameters.
+    fn finalize_tag(&mut self) {
+        //TODO: Implement.
     }
 }
