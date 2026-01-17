@@ -93,9 +93,29 @@ macro_rules! do_mix {
         const W1: usize = W0 + 1;
         let mut w0: u64 = u64::from_le($state_words[W0]);
         let     w1: u64 = u64::from_le($state_words[W1]);
+        // 1. Increment @w0 by @w1 and store it.
         w0 = w0.wrapping_add(w1);
         $state_words[W0] = w0.to_le();
+        // 2. Rotate @w1 left by a constant, XOR with @w0 and store it.
         $state_words[W1] = (w1.rotate_left($rot_const) ^ w0).to_le();
+     }}
+}
+macro_rules! undo_mix {
+    ($state_words:expr,
+     $state_idx:literal,
+     $rot_const:literal) =>
+     {{
+         const W0: usize = $state_idx * 2;
+         const W1: usize = W0 + 1;
+         let     w0: u64 = u64::from_le($state_words[W0]);
+         let mut w1: u64 = u64::from_le($state_words[W1]);
+         // 1. Rotate @w1 right by a constant, XOR with @w0.
+         w1 = (w1 ^ w0).rotate_right($rot_const);
+         // 2. Decrement @w0 by @w1.
+         w0 = w0.wrapping_sub(w1);
+         // 3. Store both.
+         $state_words[W0] = w0.to_le();
+         $state_words[W1] = w1.to_le();
      }}
 }
 macro_rules! subkey_idx    { ($round_num:literal) => ($round_num / 4usize) }
