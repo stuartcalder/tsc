@@ -120,11 +120,8 @@ macro_rules! undo_mix {
 }
 macro_rules! subkey_idx    { ($round_num:literal) => ($round_num / 4usize) }
 macro_rules! subkey_offset { ($round_num:literal) => (subkey_idx!($round_num) * NUM_BLOCK_WORDS) }
-macro_rules! use_subkey_static {
-    ($key_schedule_words:expr,
-     $state_words:expr,
-     $operation:tt,
-     $round_num:literal) =>
+macro_rules! add_subkey_static {
+    ($key_schedule_words:expr, $state_words:expr, $round_num:literal) =>
     {{
         let state:  u64 = u64::from_le($state_words[0]);
         let keysch: u64 = u64::from_le($key_schedule_words[subkey_offset!($round_num)]);
@@ -159,21 +156,41 @@ macro_rules! use_subkey_static {
         $state_words[7] = state.wrapping_add(keysch).to_le();
     }}
 }
-//FIXME: Changed use_subkey_static!() to use wrapping_add() for all arithmetic. Rethink how this
-//works.
-macro_rules! add_subkey_static {
+macro_rules! sub_subkey_static {
     ($key_schedule_words:expr, $state_words:expr, $round_num:literal) =>
-    {
-        use_subkey_static!($key_schedule_words, $state_words, +, $round_num);
-    }
-}
+    {{
+        let state:  u64 = u64::from_le($state_words[0]);
+        let keysch: u64 = u64::from_le($key_schedule_words[subkey_offset!($round_num)]);
+        $state_words[0] = state.wrapping_sub(keysch).to_le();
 
-#[allow(unused)]
-macro_rules! subtract_subkey_static {
-    ($key_schedule_words:expr, $state_words:expr, $round_num:literal) =>
-    {
-        use_subkey_static!($key_schedule_words, $state_words, -, $round_num);
-    }
+        let state:  u64 = u64::from_le($state_words[1]);
+        let keysch: u64 = u64::from_le($key_schedule_words[subkey_offset!($round_num) + 1]);
+        $state_words[1] = state.wrapping_sub(keysch).to_le();
+
+        let state:  u64 = u64::from_le($state_words[2]);
+        let keysch: u64 = u64::from_le($key_schedule_words[subkey_offset!($round_num) + 2]);
+        $state_words[2] = state.wrapping_sub(keysch).to_le();
+
+        let state:  u64 = u64::from_le($state_words[3]);
+        let keysch: u64 = u64::from_le($key_schedule_words[subkey_offset!($round_num) + 3]);
+        $state_words[3] = state.wrapping_sub(keysch).to_le();
+
+        let state:  u64 = u64::from_le($state_words[4]);
+        let keysch: u64 = u64::from_le($key_schedule_words[subkey_offset!($round_num) + 4]);
+        $state_words[4] = state.wrapping_sub(keysch).to_le();
+
+        let state:  u64 = u64::from_le($state_words[5]);
+        let keysch: u64 = u64::from_le($key_schedule_words[subkey_offset!($round_num) + 5]);
+        $state_words[5] = state.wrapping_sub(keysch).to_le();
+
+        let state:  u64 = u64::from_le($state_words[6]);
+        let keysch: u64 = u64::from_le($key_schedule_words[subkey_offset!($round_num) + 6]);
+        $state_words[6] = state.wrapping_sub(keysch).to_le();
+
+        let state:  u64 = u64::from_le($state_words[7]);
+        let keysch: u64 = u64::from_le($key_schedule_words[subkey_offset!($round_num) + 7]);
+        $state_words[7] = state.wrapping_sub(keysch).to_le();
+    }}
 }
 macro_rules! add_subkey_dynamic {
     ($key_words:expr,
@@ -217,6 +234,49 @@ macro_rules! add_subkey_dynamic {
         let k = u64::from_le(unsafe{ *$key_words.get_unchecked_mut((SUBKEY_IDX + 7) % NUM_KEY_WORDS_WITH_PARITY) });
         $state_words[7] = s.wrapping_add(k.wrapping_add(SUBKEY_IDX as u64)).to_le();
     }}
+}
+macro_rules! sub_subkey_dynamic {
+    ($key_words:expr,
+     $state_words:expr,
+     $tweak_words:expr,
+     $round_num:literal) =>
+     {{
+        const SUBKEY_IDX: usize = subkey_idx!($round_num);
+
+        let s = u64::from_le($state_words[0]);
+        let k = u64::from_le(unsafe{ *$key_words.get_unchecked_mut(SUBKEY_IDX % NUM_KEY_WORDS_WITH_PARITY) });
+        $state_words[0] = s.wrapping_sub(k).to_le();
+
+        let s = u64::from_le($state_words[1]);
+        let k = u64::from_le(unsafe{ *$key_words.get_unchecked_mut((SUBKEY_IDX + 1) % NUM_KEY_WORDS_WITH_PARITY) });
+        $state_words[1] = s.wrapping_sub(k).to_le();
+
+        let s = u64::from_le($state_words[2]);
+        let k = u64::from_le(unsafe{ *$key_words.get_unchecked_mut((SUBKEY_IDX + 2) % NUM_KEY_WORDS_WITH_PARITY) });
+        $state_words[2] = s.wrapping_sub(k).to_le();
+
+        let s = u64::from_le($state_words[3]);
+        let k = u64::from_le(unsafe{ *$key_words.get_unchecked_mut((SUBKEY_IDX + 3) % NUM_KEY_WORDS_WITH_PARITY) });
+        $state_words[3] = s.wrapping_sub(k).to_le();
+
+        let s = u64::from_le($state_words[4]);
+        let k = u64::from_le(unsafe{ *$key_words.get_unchecked_mut((SUBKEY_IDX + 4) % NUM_KEY_WORDS_WITH_PARITY) });
+        $state_words[4] = s.wrapping_sub(k).to_le();
+
+        let s = u64::from_le($state_words[5]);
+        let k = u64::from_le(unsafe{ *$key_words.get_unchecked_mut((SUBKEY_IDX + 5) % NUM_KEY_WORDS_WITH_PARITY) });
+        let t = u64::from_le(unsafe{ *$tweak_words.get_unchecked_mut(SUBKEY_IDX % 3) });
+        $state_words[5] = s.wrapping_sub(k.wrapping_add(t)).to_le();
+
+        let s = u64::from_le($state_words[6]);
+        let k = u64::from_le(unsafe{ *$key_words.get_unchecked_mut((SUBKEY_IDX + 6) % NUM_KEY_WORDS_WITH_PARITY) });
+        let t = u64::from_le(unsafe{ *$tweak_words.get_unchecked_mut((SUBKEY_IDX + 1) % 3) });
+        $state_words[6] = s.wrapping_sub(k.wrapping_add(t)).to_le();
+
+        let s = u64::from_le($state_words[7]);
+        let k = u64::from_le(unsafe{ *$key_words.get_unchecked_mut((SUBKEY_IDX + 7) % NUM_KEY_WORDS_WITH_PARITY) });
+        $state_words[7] = s.wrapping_sub(k.wrapping_add(SUBKEY_IDX as u64)).to_le();
+     }}
 }
 macro_rules! permute {
     ($state_words:expr) =>
@@ -310,6 +370,22 @@ macro_rules! encrypt_round_static {
         mix4_permute!($state_words, $rc3_0, $rc3_1, $rc3_2, $rc3_3);
     }}
 }
+macro_rules! decrypt_round_static {
+    ($key_schedule_words:expr,
+     $state_words:expr,
+     $round_start:literal,
+     $rc0_0:literal, $rc0_1:literal, $rc0_2:literal, $rc0_3:literal,
+     $rc1_0:literal, $rc1_1:literal, $rc1_2:literal, $rc1_3:literal,
+     $rc2_0:literal, $rc2_1:literal, $rc2_2:literal, $rc2_3:literal,
+     $rc3_0:literal, $rc3_1:literal, $rc3_2:literal, $rc3_3:literal) =>
+     {{
+        undo_mix4_permute!($state_words, $rc3_0, $rc3_1, $rc3_2, $rc3_3);
+        undo_mix4_permute!($state_words, $rc2_0, $rc2_1, $rc2_2, $rc2_3);
+        undo_mix4_permute!($state_words, $rc1_0, $rc1_1, $rc1_2, $rc1_3);
+        undo_mix4_permute!($state_words, $rc0_0, $rc0_1, $rc0_2, $rc0_3);
+        sub_subkey_static!($key_schedule_words, $state_words, $round_start);
+     }}
+}
 macro_rules! encrypt_round_dynamic {
     ($key_words:expr,
      $state_words:expr,
@@ -327,12 +403,45 @@ macro_rules! encrypt_round_dynamic {
         mix4_permute!($state_words, $rc3_0, $rc3_1, $rc3_2, $rc3_3);
     }}
 }
+macro_rules! decrypt_round_dynamic {
+    ($key_words:expr,
+     $state_words:expr,
+     $tweak_words:expr,
+     $round_start:literal,
+     $rc0_0:literal, $rc0_1:literal, $rc0_2:literal, $rc0_3:literal,
+     $rc1_0:literal, $rc1_1:literal, $rc1_2:literal, $rc1_3:literal,
+     $rc2_0:literal, $rc2_1:literal, $rc2_2:literal, $rc2_3:literal,
+     $rc3_0:literal, $rc3_1:literal, $rc3_2:literal, $rc3_3:literal) =>
+     {{
+        undo_mix4_permute!($state_words, $rc3_0, $rc3_1, $rc3_2, $rc3_3);
+        undo_mix4_permute!($state_words, $rc2_0, $rc2_1, $rc2_2, $rc2_3);
+        undo_mix4_permute!($state_words, $rc1_0, $rc1_1, $rc1_2, $rc1_3);
+        undo_mix4_permute!($state_words, $rc0_0, $rc0_1, $rc0_2, $rc0_3);
+        sub_subkey_dynamic!($key_words, $state_words, $tweak_words, $round_start);
+     }}
+}
 macro_rules! encrypt_static_phase_0 {
     ($key_schedule_words:expr,
      $state_words:expr,
      $round_start:literal) =>
     {
         encrypt_round_static!(
+            $key_schedule_words,
+            $state_words,
+            $round_start,
+            46, 36, 19, 37,
+            33, 27, 14, 42,
+            17, 49, 36, 39,
+            44,  9, 54, 56
+        );
+    }
+}
+macro_rules! decrypt_static_phase_0 {
+    ($key_schedule_words:expr,
+     $state_words:expr,
+     $round_start:literal) =>
+    {
+        decrypt_round_static!(
             $key_schedule_words,
             $state_words,
             $round_start,
@@ -361,12 +470,46 @@ macro_rules! encrypt_dynamic_phase_0 {
         );
     }
 }
+macro_rules! decrypt_dynamic_phase_0 {
+    ($key_words:expr,
+     $state_words:expr,
+     $tweak_words:expr,
+     $round_start:literal) =>
+    {
+        decrypt_round_dynamic!(
+            $key_words,
+            $state_words,
+            $tweak_words,
+            $round_start,
+            46, 36, 19, 37,
+            33, 27, 14, 42,
+            17, 49, 36, 39,
+            44,  9, 54, 56
+        );
+    }
+}
 macro_rules! encrypt_static_phase_1 {
     ($key_schedule_words:expr,
      $state_words:expr,
      $round_start:literal) =>
     {
         encrypt_round_static!(
+            $key_schedule_words,
+            $state_words,
+            $round_start,
+            39, 30, 34, 24,
+            13, 50, 10, 17,
+            25, 29, 39, 43,
+             8, 35, 56, 22
+        );
+    }
+}
+macro_rules! decrypt_static_phase_1 {
+    ($key_schedule_words:expr,
+     $state_words:expr,
+     $round_start:literal) =>
+    {
+        decrypt_round_static!(
             $key_schedule_words,
             $state_words,
             $round_start,
@@ -384,6 +527,24 @@ macro_rules! encrypt_dynamic_phase_1 {
      $round_start:literal) =>
     {
         encrypt_round_dynamic!(
+            $key_words,
+            $state_words,
+            $tweak_words,
+            $round_start,
+            39, 30, 34, 24,
+            13, 50, 10, 17,
+            25, 29, 39, 43,
+             8, 35, 56, 22
+        );
+    }
+}
+macro_rules! decrypt_dynamic_phase_1 {
+    ($key_words:expr,
+     $state_words:expr,
+     $tweak_words:expr,
+     $round_start:literal) =>
+    {
+        decrypt_round_dynamic!(
             $key_words,
             $state_words,
             $tweak_words,
@@ -418,6 +579,29 @@ macro_rules! encrypt_static {
         add_subkey_static!($static.key_schedule, $static.state, 72);
     }
 }
+macro_rules! decrypt_static {
+    ($state:expr) => {
+        sub_subkey_static!($state.key_schedule, $static.state, 72);
+        decrypt_static_phase_1!($static.key_schedule, $static.state, 68);
+        decrypt_static_phase_0!($static.key_schedule, $static.state, 64);
+        decrypt_static_phase_1!($static.key_schedule, $static.state, 60);
+        decrypt_static_phase_0!($static.key_schedule, $static.state, 56);
+        decrypt_static_phase_1!($static.key_schedule, $static.state, 52);
+        decrypt_static_phase_0!($static.key_schedule, $static.state, 48);
+        decrypt_static_phase_1!($static.key_schedule, $static.state, 44);
+        decrypt_static_phase_0!($static.key_schedule, $static.state, 40);
+        decrypt_static_phase_1!($static.key_schedule, $static.state, 36);
+        decrypt_static_phase_0!($static.key_schedule, $static.state, 32);
+        decrypt_static_phase_1!($static.key_schedule, $static.state, 28);
+        decrypt_static_phase_0!($static.key_schedule, $static.state, 24);
+        decrypt_static_phase_1!($static.key_schedule, $static.state, 20);
+        decrypt_static_phase_0!($static.key_schedule, $static.state, 16);
+        decrypt_static_phase_1!($static.key_schedule, $static.state, 12);
+        decrypt_static_phase_0!($static.key_schedule, $static.state,  8);
+        decrypt_static_phase_1!($static.key_schedule, $static.state,  4);
+        decrypt_static_phase_0!($static.key_schedule, $static.state,  0);
+    }
+}
 macro_rules! encrypt_dynamic {
     ($dynamic:expr) => {
         encrypt_dynamic_phase_0!($dynamic.key, $dynamic.state, $dynamic.tweak,  0);
@@ -439,6 +623,29 @@ macro_rules! encrypt_dynamic {
         encrypt_dynamic_phase_0!($dynamic.key, $dynamic.state, $dynamic.tweak, 64);
         encrypt_dynamic_phase_1!($dynamic.key, $dynamic.state, $dynamic.tweak, 68);
         add_subkey_dynamic!($dynamic.key, $dynamic.state, $dynamic.tweak, 72);
+    }
+}
+macro_rules! decrypt_dynamic {
+    ($dynamic:expr) => {
+        sub_subkey_dynamic!($dynamic.key, $dynamic.state, $dynamic.tweak, 72);
+        decrypt_dynamic_phase_1!($dynamic.key, $dynamic.state, $dynamic.tweak, 68);
+        decrypt_dynamic_phase_0!($dynamic.key, $dynamic.state, $dynamic.tweak, 64);
+        decrypt_dynamic_phase_1!($dynamic.key, $dynamic.state, $dynamic.tweak, 60);
+        decrypt_dynamic_phase_0!($dynamic.key, $dynamic.state, $dynamic.tweak, 56);
+        decrypt_dynamic_phase_1!($dynamic.key, $dynamic.state, $dynamic.tweak, 52);
+        decrypt_dynamic_phase_0!($dynamic.key, $dynamic.state, $dynamic.tweak, 48);
+        decrypt_dynamic_phase_1!($dynamic.key, $dynamic.state, $dynamic.tweak, 44);
+        decrypt_dynamic_phase_0!($dynamic.key, $dynamic.state, $dynamic.tweak, 40);
+        decrypt_dynamic_phase_1!($dynamic.key, $dynamic.state, $dynamic.tweak, 36);
+        decrypt_dynamic_phase_0!($dynamic.key, $dynamic.state, $dynamic.tweak, 32);
+        decrypt_dynamic_phase_1!($dynamic.key, $dynamic.state, $dynamic.tweak, 28);
+        decrypt_dynamic_phase_0!($dynamic.key, $dynamic.state, $dynamic.tweak, 24);
+        decrypt_dynamic_phase_1!($dynamic.key, $dynamic.state, $dynamic.tweak, 20);
+        decrypt_dynamic_phase_0!($dynamic.key, $dynamic.state, $dynamic.tweak, 16);
+        decrypt_dynamic_phase_1!($dynamic.key, $dynamic.state, $dynamic.tweak, 12);
+        decrypt_dynamic_phase_0!($dynamic.key, $dynamic.state, $dynamic.tweak,  8);
+        decrypt_dynamic_phase_1!($dynamic.key, $dynamic.state, $dynamic.tweak,  4);
+        decrypt_dynamic_phase_0!($dynamic.key, $dynamic.state, $dynamic.tweak,  0);
     }
 }
 macro_rules! xor_8 {
@@ -629,15 +836,31 @@ impl Threefish512Static {
         encrypt_static!(self);
         encipher_io.copy_from_slice(&self.state);
     }
+    pub fn decipher_1(
+        &mut self,
+        decipher_io: &mut [u64])
+    {
+        self.state.copy_from_slice(decipher_io);
+        decrypt_static!(self);
+        decipher_io.copy_from_slice(&self.state);
+    }
     pub fn encipher_2<'a>(
         &mut self,
         ciphertext_output: &'a mut [u64],
-        plaintext_input:   &'a     [u64]
-    )
+        plaintext_input:   &'a     [u64])
     {
         self.state.copy_from_slice(plaintext_input);
         encrypt_static!(self);
         ciphertext_output.copy_from_slice(&self.state);
+    }
+    pub fn decipher_2<'a>(
+        &mut self,
+        plaintext_output: &'a mut [u64],
+        ciphertext_input: &'a     [u64])
+    {
+        self.state.copy_from_slice(ciphertext_input);
+        decrypt_static!(self);
+        plaintext_output.copy_from_slice(&self.state);
     }
 }
 
@@ -682,6 +905,14 @@ impl Threefish512Dynamic {
         encrypt_dynamic!(self);
         encipher_io.copy_from_slice(&self.state);
     }
+    pub fn decipher_1(
+        &mut self,
+        decipher_io: &mut [u64])
+    {
+        self.state.copy_from_slice(decipher_io);
+        decrypt_dynamic!(self);
+        decipher_io.copy_from_slice(&self.state);
+    }
     pub fn encipher_2(
         &mut self,
         ciphertext_output: &mut [u64],
@@ -690,6 +921,15 @@ impl Threefish512Dynamic {
         self.state.copy_from_slice(plaintext_input);
         encrypt_dynamic!(self);
         ciphertext_output.copy_from_slice(&self.state);
+    }
+    pub fn decipher_2(
+        &mut self,
+        plaintext_output: &mut [u64],
+        ciphertext_input: &    [u64])
+    {
+        self.state.copy_from_slice(ciphertext_input);
+        decrypt_dynamic!(self);
+        plaintext_output.copy_from_slice(&self.state);
     }
     pub fn encipher_into_key(
         &mut self,
