@@ -42,11 +42,12 @@ pub const CONST_240: u64 = 0x1BD11BDAA9FC1A22u64.to_le();
 pub const NUM_CTR_IV_BYTES: usize = 32;
 pub const NUM_CTR_IV_WORDS: usize = 4;
 
-pub const OCBT_DOMAIN_AD_CRYPT: u64      = 0b00u64; /// Ciphering the additional data.
-pub const OCBT_DOMAIN_AD_FINALIZE: u64   = 0b01u64; /// Ciphering the final additional data block.
-pub const OCBT_DOMAIN_DATA_CRYPT: u64    = 0b10u64; /// Ciphering the payload.
-pub const OCBT_DOMAIN_DATA_FINALIZE: u64 = 0b11u64; /// Ciphering the final payload block.
-pub const OCBT_DOMAIN_MASK: u64          = 0xfffffffffffffff3u64; /// All bits EXCEPT the domain bits.
+pub const OCBT_DOMAIN_AD: u64            = 0b00u64; /// Ciphering the additional data.
+pub const OCBT_DOMAIN_DATA: u64          = 0b01u64; /// Ciphering the payload data.
+pub const OCBT_DOMAIN_DATA_FINALIZE: u64 = 0b10u64; /// Finalizing payload processing.
+pub const OCBT_DOMAIN_TAG: u64           = 0b11u64; /// Creating the authentication tag.
+pub const OCBT_TAG_WORDS: usize = 8;
+pub const OCBT_TAG_BYTES: usize = 64;
 
 macro_rules! store_word {
     ($key_schedule:expr,
@@ -883,6 +884,11 @@ enum OcbtFinalBlock {
     Partial(&[u8]),
 }
 
+enum OcbtFinalBlockMut {
+    Whole(&mut [u64; NUM_BLOCK_WORDS]),
+    Partial(&mut [u8]),
+}
+
 impl Threefish512Ocbt {
     /// Create a new OCB-T instance with a 512-bit key and a 62-bit nonce.
     pub fn new(key: &[u64; NUM_KEY_WORDS], nonce: u64) -> Self {
@@ -924,7 +930,7 @@ impl Threefish512Ocbt {
         tmp: &mut [u64; NUM_BLOCK_WORDS],
         block: &[u64; NUM_BLOCK_WORDS])
     {
-        self.set_tweak(OCBT_DOMAIN_AD_CRYPT, self.block_counter);
+        self.set_tweak(OCBT_DOMAIN_AD, self.block_counter);
         self.tf.encipher_2(tmp, block);
         for i in 0usize..NUM_BLOCK_WORDS {
             self.ad_acc[i] ^= tmp[i];
@@ -935,11 +941,10 @@ impl Threefish512Ocbt {
     fn process_ad_block_final(
         &mut self,
         tmp: &mut [u64; NUM_BLOCK_WORDS],
-        finalblk: OcbtFinalBlock)
+        final_block: OcbtFinalBlock)
     {
-        // Set the tweak for AD finalization.
-        self.set_tweak(OCBT_DOMAIN_AD_FINALIZE, self.block_counter);
-        match finalblk {
+        self.set_tweak(OCBT_DOMAIN_AD, self.block_counter);
+        match final_block {
             OcbtFinalBlock::Whole(whole) => {
                 self.tf.encipher_2(tmp, whole);
                 for i in 0usize..NUM_BLOCK_WORDS {
@@ -978,7 +983,7 @@ impl Threefish512Ocbt {
         block_in: &[u64; NUM_BLOCK_WORDS])
     {
         // 1. Set the tweak for enciphering payload.
-        self.set_tweak(OCBT_DOMAIN_DATA_CRYPT, self.block_counter);
+        self.set_tweak(OCBT_DOMAIN_DATA, self.block_counter);
         // 2. Encrypt the plaintext block.
         self.tf.encipher_2(block_out, block_in);
         // 3. Update the data accumulator using the plaintext for authentication.
@@ -989,6 +994,69 @@ impl Threefish512Ocbt {
         self.block_counter += 1;
     }
 
+    fn encrypt_final_block(
+        &mut self,
+        final_out: OcbtFinalBlockMut,
+        tmp:       &mut [u64; NUM_BLOCK_WORDS],
+        final_in:  OcbtFinalBlock)
+    {
+        self.set_tweak(OCBT_DOMAIN_DATA_FINALIZE, self.block_counter);
+        match (final_out, final_in) {
+             // ---------------- Whole final block ---------------------------------
+             (OcbtFinalBlockMut::Whole(out_blk), OcbtFinalBlock::Whole(in_blk)) => {
+                 // 1. Encrypt the plaintext.
+                 self.tf.encipher_2(out_blk, in_blk);
+                 // 2. Update data accumulator with plaintext for authentication.
+                 for i in 0usize..NUM_BLOCK_WORDS {
+                     self.data_acc[i] ^= in_blk[i];
+                 }
+                 // 3. Increment unified block counter.
+                 self.block_counter += 1;
+             },
+             // ---------------- Partial final block ---------------------------------
+             (OcbtFinalBlockMut::Partial(out_bytes), OcbtFinalBlock::Partial(in_bytes)) => {
+                 if out_bytes.len() != in_bytes.len() {
+                     panic!("out_bytes.len() != in_bytes.len()!");
+                 }
+
+                 let plen = in_bytes.len();
+
+                 // 1. Build padded plaintext into @tmp.
+                 {
+                     let tmp_bytes: &mut [u8; NUM_BLOCK_BYTES] = unsafe {
+                         &mut *(tmp as *mut [u64; NUM_BLOCK_WORDS] as *mut [u8; NUM_BLOCK_BYTES])
+                     };
+                     // Copy partial plaintext.
+                     tmp_bytes[..plen].copy_from_slice(in_bytes);
+                     // Append 0x80.
+                     tmp_bytes[plen] = 0x80u8;
+                     // Zero-pad the rest.
+                     for b in &mut tmp_bytes[plen + 1..] {
+                         *b = 0u8;
+                     }
+                 }
+                 // 2. Update data accumulator with padded plaintext for authentication.
+                 for i in 0usize..NUM_BLOCK_WORDS {
+                     self.data_acc[i] ^= tmp[i];
+                 }
+
+                 // 3. Encrypt padded plaintext in place.
+                 self.tf.encipher_1(tmp);
+
+                 // 4. Ciphertext is the first @plen bytes of encrypted @tmp.
+                 let enc_bytes: &[u8; NUM_BLOCK_BYTES] = unsafe {
+                     &*(&*tmp as *const [u64; NUM_BLOCK_WORDS] as *const [u8; NUM_BLOCK_BYTES])
+                 };
+                 out_bytes.copy_from_slice(&enc_bytes[..plen]);
+
+                 // 5. Increment counter.
+                 self.block_counter += 1;
+             },
+             _ => panic!("encrypt_final_block() given different input and output block sizes!");
+        }
+    }
+
+    //TODO: FIXME: REMOVE_ME
     fn encrypt_final_block(
         &mut self,
         block_out: &mut [u64; NUM_BLOCK_WORDS],
@@ -1043,16 +1111,6 @@ impl Threefish512Ocbt {
                 self.block_counter += 1;
             },
         }
-    }
-
-    fn encrypt_partial_block(&mut self, tmp: &mut [u64; NUM_BLOCK_WORDS], finalblk: OcbtFinalBlock) {
-        match finalblk {
-            OcbtFinalBlock::Whole(whole) => {
-            },
-            OcbtFinalBlock::Partial(partial) => {
-            },
-        }
-        //TODO: Implement.
     }
 
     //TODO: Define parameters.
