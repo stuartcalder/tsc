@@ -14,6 +14,7 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
+#![allow(unused)] // FIXME: Remove me.
 
 pub const NUM_BLOCK_BITS: usize  = 512;
 pub const NUM_BLOCK_BYTES: usize = 64;
@@ -107,7 +108,7 @@ macro_rules! undo_mix {
      {{
          const W0: usize = $state_idx * 2;
          const W1: usize = W0 + 1;
-         let     w0: u64 = u64::from_le($state_words[W0]);
+         let mut w0: u64 = u64::from_le($state_words[W0]);
          let mut w1: u64 = u64::from_le($state_words[W1]);
          // 1. Rotate @w1 right by a constant, XOR with @w0.
          w1 = (w1 ^ w0).rotate_right($rot_const);
@@ -281,10 +282,9 @@ macro_rules! sub_subkey_dynamic {
 macro_rules! permute {
     ($state_words:expr) =>
     {{
-        // We don't bother with @a5 since it doesn't move in the permutation.
         unsafe {
              let a0 = *$state_words.get_unchecked(0);
-             let a1 = *$state_words.get_unchecked(1);
+             //let a1 = *$state_words.get_unchecked(1);
              let a2 = *$state_words.get_unchecked(2);
              let a3 = *$state_words.get_unchecked(3);
              let a4 = *$state_words.get_unchecked(4);
@@ -292,7 +292,7 @@ macro_rules! permute {
              let a6 = *$state_words.get_unchecked(6);
              let a7 = *$state_words.get_unchecked(7);
              *$state_words.get_unchecked_mut(0) = a2;
-             *$state_words.get_unchecked_mut(1) = a1;
+             //*$state_words.get_unchecked_mut(1) = a1;
              *$state_words.get_unchecked_mut(2) = a4;
              *$state_words.get_unchecked_mut(3) = a7;
              *$state_words.get_unchecked_mut(4) = a6;
@@ -305,10 +305,9 @@ macro_rules! permute {
 macro_rules! undo_permute {
     ($state_words:expr) =>
     {{
-        // We don't bother with @a5 since it doesn't move in the permutation.
         unsafe {
              let a0 = *$state_words.get_unchecked(0);
-             let a1 = *$state_words.get_unchecked(1);
+             //let a1 = *$state_words.get_unchecked(1);
              let a2 = *$state_words.get_unchecked(2);
              let a3 = *$state_words.get_unchecked(3);
              let a4 = *$state_words.get_unchecked(4);
@@ -316,7 +315,7 @@ macro_rules! undo_permute {
              let a6 = *$state_words.get_unchecked(6);
              let a7 = *$state_words.get_unchecked(7);
              *$state_words.get_unchecked_mut(0) = a6;
-             *$state_words.get_unchecked_mut(1) = a1;
+             //*$state_words.get_unchecked_mut(1) = a1;
              *$state_words.get_unchecked_mut(2) = a0;
              *$state_words.get_unchecked_mut(3) = a7;
              *$state_words.get_unchecked_mut(4) = a2;
@@ -580,8 +579,8 @@ macro_rules! encrypt_static {
     }
 }
 macro_rules! decrypt_static {
-    ($state:expr) => {
-        sub_subkey_static!($state.key_schedule, $static.state, 72);
+    ($static:expr) => {
+        sub_subkey_static!($static.key_schedule, $static.state, 72);
         decrypt_static_phase_1!($static.key_schedule, $static.state, 68);
         decrypt_static_phase_0!($static.key_schedule, $static.state, 64);
         decrypt_static_phase_1!($static.key_schedule, $static.state, 60);
@@ -1186,19 +1185,19 @@ pub struct Threefish512Ocbt {
     pub data_acc: [u64; NUM_BLOCK_WORDS],
 }
 
-enum OcbtFinalBlock {
-    Whole(&[u64; NUM_BLOCK_WORDS]),
-    Partial(&[u8]),
+enum OcbtFinalBlock<'a> {
+    Whole(&'a   [u64; NUM_BLOCK_WORDS]),
+    Partial(&'a [u8]),
 }
 
-enum OcbtFinalBlockMut {
-    Whole(&mut [u64; NUM_BLOCK_WORDS]),
-    Partial(&mut [u8]),
+enum OcbtFinalBlockMut<'a> {
+    Whole(&'a   mut [u64; NUM_BLOCK_WORDS]),
+    Partial(&'a mut [u8]),
 }
 
 impl Threefish512Ocbt {
     /// Create a new OCB-T instance with a 512-bit key and a 62-bit nonce.
-    pub fn new(key: &[u64; NUM_KEY_WORDS], nonce: u64) -> Self {
+    pub fn new(key: &[u64; NUM_KEY_WORDS_WITH_PARITY], nonce: u64) -> Self {
         let mut tweak = [0u64; NUM_TWEAK_WORDS_WITH_PARITY];
 
         // The two domain bits are initially zero.
@@ -1359,7 +1358,9 @@ impl Threefish512Ocbt {
                  // 5. Increment counter.
                  self.block_counter += 1;
              },
-             _ => panic!("encrypt_final_block() given different input and output block sizes!");
+             _ => {
+                 panic!("encrypt_final_block() given different input and output block sizes!");
+             }
         }
     }
 
@@ -1381,7 +1382,7 @@ impl Threefish512Ocbt {
 
         // 4. Export as bytes.
         let tmp_bytes: &[u8; NUM_BLOCK_BYTES] = unsafe {
-            &*(&tmp as *const [u64; NUM_BLOCK_WORDS] as *const [u8; NUM_BLOCK_BYTES])
+            &*(tmp as *const [u64; NUM_BLOCK_WORDS] as *const [u8; NUM_BLOCK_BYTES])
         };
         tag_out.copy_from_slice(tmp_bytes);
         
@@ -1409,7 +1410,7 @@ impl Threefish512Ocbt {
 
     pub fn seal(
         ct_out: &mut [u8],
-        tag_out: &mut [u8, OCBT_TAG_BYTES],
+        tag_out: &mut [u8; OCBT_TAG_BYTES],
         key:   &[u64; NUM_KEY_WORDS],
         nonce: u64,
         ad:    Option<&[u8]>,
