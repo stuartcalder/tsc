@@ -49,6 +49,11 @@ pub const OCBT_DOMAIN_TAG: u64           = 0b11u64; /// Creating the authenticat
 pub const OCBT_TAG_WORDS: usize = 8;
 pub const OCBT_TAG_BYTES: usize = 64;
 
+pub enum OcbtAuthError {
+    TagMismatch,
+    InvalidLength
+}
+
 macro_rules! store_word {
     ($key_schedule:expr,
      $key_words:expr,
@@ -1056,65 +1061,58 @@ impl Threefish512Ocbt {
         }
     }
 
-    //TODO: FIXME: REMOVE_ME
-    fn encrypt_final_block(
+    fn finalize_tag(
         &mut self,
-        block_out: &mut [u64; NUM_BLOCK_WORDS],
-        tmp:       &mut [u64; NUM_BLOCK_WORDS],
-        final_in:  OcbtFinalBlock)
+        tag_out: &mut [u8; OCBT_TAG_BYTES],
+        tmp:     &mut [u64; NUM_BLOCK_WORDS])
     {
-        self.set_tweak(OCBT_DOMAIN_DATA_FINALIZE, self.block_counter);
-        match final_in {
-            OcbtFinalBlock::Whole(whole) => {
-                // 1. Encrypt the plaintext.
-                self.tf.encipher_2(block_out, whole);
-                // 2. Update the data accumulator using the plaintext for authentication.
-                for i in 0usize..NUM_BLOCK_WORDS {
-                    self.data_acc[i] ^= whole[i];
-                }
-                // 3. Increment the unified block counter.
-                self.block_counter += 1;
-            },
-            OcbtFinalBlock::Partial(partial) => {
-                let plen = partial.len();
-                // 1. Build padded plaintext in @tmp.
-                {
-                    let padded_bytes: &mut [u8; NUM_BLOCK_BYTES] = unsafe {
-                        &mut *(tmp as *mut [u64; NUM_BLOCK_WORDS] as *mut [u8; NUM_BLOCK_BYTES])
-                    };
-                    padded_bytes[..plen].copy_from_slice(partial);
-                    padded_bytes[plen] = 0x80u8;
-                    for b in &mut padded_bytes[plen + 1 ..] {
-                        *b = 0u8;
-                    }
-                }
-
-                // 2. Update data accumulator with padded plaintext (authentication).
-                for i in 0usize..NUM_BLOCK_WORDS {
-                    self.data_acc[i] ^= tmp[i];
-                }
-
-                // 3. Set tweak for DATA_FINALIZE and encrypt the padded plaintext in place.
-                self.tf.encipher_1(&mut tmp);
-
-                // 4. Ciphertext is the first @plen bytes of the encrypted padded block,
-                //    so copy only those bytes into @block_out; the rest is unspecified.
-                let enc_bytes: &[u8; NUM_BLOCK_BYTES] = unsafe {
-                    &*(tmp as *const [u64; NUM_BLOCK_WORDS] as *const [u8; NUM_BLOCK_BYTES])
-                };
-                let out_bytes: &mut [u8; NUM_BLOCK_BYTES] = unsafe {
-                    &mut *(block_out as *mut [u64; NUM_BLOCK_WORDS] as *mut [u8; NUM_BLOCK_BYTES])
-                };
-                out_bytes[..plen].copy_from_slice(&enc_bytes[..plen]);
-
-                // 5. Increment unified block counter.
-                self.block_counter += 1;
-            },
+        // 1. Combine AD and DATA accumulators into a temporary block.
+        for i in 0usize..NUM_BLOCK_WORDS {
+            tmp[i] = self.ad_acc[i] ^ self.data_acc[i];
         }
+
+        // 2. Set tweak for TAG creation.
+        self.set_tweak(OCBT_DOMAIN_TAG, self.block_counter);
+
+        // 3. Encrypt the combined accumulator in place.
+        self.tf.encipher_1(tmp);
+
+        // 4. Export as bytes.
+        let tmp_bytes: &[u8; NUM_BLOCK_BYTES] = unsafe {
+            &*(&tmp as *const [u64; NUM_BLOCK_WORDS] as *const [u8; NUM_BLOCK_BYTES])
+        };
+        tag_out.copy_from_slice(tmp_bytes);
+        
+        // We don't bother bumping the counter since this function is terminal.
     }
 
-    //TODO: Define parameters.
-    fn finalize_tag(&mut self) {
-        //TODO: Implement.
+    pub fn absorb_ad(&mut self, ad: &[u8]) {
+        //TODO
+        // split into full 64-byte blocks → process_ad_block_full
+        // final partial block → process_ad_block_final
+    }
+
+    pub fn encrypt(&mut self, ct_out: &mut [u8], pt: &[u8]) {
+        //TODO
+        // full blocks -> encrypt_full_block
+        // final partial -> encrypt_final_block
+    }
+
+    pub fn decrypt(&mut self, pt_out: &mut [u8], ct: &[u8]) {
+        //TODO
+        // TODO: Implement Threefish512 decryption routines.
+        // TODO: full blocks   -> TODO(implement) decrypt_full_block
+        // TODO: final partial -> TODO(implement) decrypt_final_block
+    }
+
+    pub fn seal(
+        ct_out: &mut [u8],
+        tag_out: &mut [u8, OCBT_TAG_BYTES],
+        key:   &[u64; NUM_KEY_WORDS],
+        nonce: u64,
+        ad:    Option<&[u8]>,
+        pt:    Option<&[u8]>)
+    {
+        //TODO
     }
 }
