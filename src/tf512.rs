@@ -221,20 +221,48 @@ macro_rules! add_subkey_dynamic {
 macro_rules! permute {
     ($state_words:expr) =>
     {{
-        let mut w0: u64;
-        let     w1: u64;
-        unsafe
-        {
-            w0 = *$state_words.get_unchecked_mut(6);
-            *$state_words.get_unchecked_mut(6) = *$state_words.get_unchecked_mut(0);
-            w1 = *$state_words.get_unchecked_mut(4);
-            *$state_words.get_unchecked_mut(4) = w0;
-            w0 = *$state_words.get_unchecked_mut(2);
-            *$state_words.get_unchecked_mut(2) = w1;
-            *$state_words.get_unchecked_mut(0) = w0;
-            w0 = *$state_words.get_unchecked_mut(3);
-            *$state_words.get_unchecked_mut(3) = *$state_words.get_unchecked_mut(7);
-            *$state_words.get_unchecked_mut(7) = w0;
+        // We don't bother with @a5 since it doesn't move in the permutation.
+        unsafe {
+             let a0 = *$state_words.get_unchecked(0);
+             let a1 = *$state_words.get_unchecked(1);
+             let a2 = *$state_words.get_unchecked(2);
+             let a3 = *$state_words.get_unchecked(3);
+             let a4 = *$state_words.get_unchecked(4);
+             // let a5 = *$state_words.get_unchecked(5);
+             let a6 = *$state_words.get_unchecked(6);
+             let a7 = *$state_words.get_unchecked(7);
+             *$state_words.get_unchecked_mut(0) = a2;
+             *$state_words.get_unchecked_mut(1) = a1;
+             *$state_words.get_unchecked_mut(2) = a4;
+             *$state_words.get_unchecked_mut(3) = a7;
+             *$state_words.get_unchecked_mut(4) = a6;
+             //*$state_words.get_unchecked_mut(5) = a5;
+             *$state_words.get_unchecked_mut(6) = a0;
+             *$state_words.get_unchecked_mut(7) = a3;
+        }
+    }}
+}
+macro_rules! undo_permute {
+    ($state_words:expr) =>
+    {{
+        // We don't bother with @a5 since it doesn't move in the permutation.
+        unsafe {
+             let a0 = *$state_words.get_unchecked(0);
+             let a1 = *$state_words.get_unchecked(1);
+             let a2 = *$state_words.get_unchecked(2);
+             let a3 = *$state_words.get_unchecked(3);
+             let a4 = *$state_words.get_unchecked(4);
+             //let a5 = *$state_words.get_unchecked(5);
+             let a6 = *$state_words.get_unchecked(6);
+             let a7 = *$state_words.get_unchecked(7);
+             *$state_words.get_unchecked_mut(0) = a6;
+             *$state_words.get_unchecked_mut(1) = a1;
+             *$state_words.get_unchecked_mut(2) = a0;
+             *$state_words.get_unchecked_mut(3) = a7;
+             *$state_words.get_unchecked_mut(4) = a2;
+             //*$state_words.get_unchecked_mut(5) = a5;
+             *$state_words.get_unchecked_mut(6) = a4;
+             *$state_words.get_unchecked_mut(7) = a3;
         }
     }}
 }
@@ -251,6 +279,20 @@ macro_rules! mix4_permute {
         do_mix!($state_words, 3usize, $rotate_const_3);
         permute!($state_words);
     }}
+}
+macro_rules! undo_mix4_permute {
+    ($state_words:expr,
+     $rotate_const_0:literal,
+     $rotate_const_1:literal,
+     $rotate_const_2:literal,
+     $rotate_const_3:literal) =>
+     {{
+         undo_permute!($state_words);
+         undo_mix!($state_words, 3usize, $rotate_const_3);
+         undo_mix!($state_words, 2usize, $rotate_const_2);
+         undo_mix!($state_words, 1usize, $rotate_const_1);
+         undo_mix!($state_words, 0usize, $rotate_const_0);
+     }}
 }
 macro_rules! encrypt_round_static {
     ($key_schedule_words:expr,
