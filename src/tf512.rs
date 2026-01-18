@@ -1270,9 +1270,7 @@ impl Threefish512Ocbt {
                 // 3. Append 0x80.
                 tmp_bytes[plen] = 0x80u8;
                 // 4. Zero-pad the remainder.
-                for b in &mut tmp_bytes[plen+1..] {
-                    *b = 0u8;
-                }
+                tmp_bytes[plen + 1 ..].fill(0u8);
                 // 5. Run Threefish512 on the padded block
                 self.tf.encipher_1(tmp);
                 // 6. XOR into AD accumulator.
@@ -1304,44 +1302,48 @@ impl Threefish512Ocbt {
 
     fn encrypt_final_block(
         &mut self,
-        block_out: &mut [u64; NUM_BLOCK_WORDS],
+        final_out: OcbtFinalBlockMut,
         tmp:       &mut [u64; NUM_BLOCK_WORDS],
         final_in:  OcbtFinalBlock)
     {
         // Set the tweak for finalizing the payload.
         self.set_tweak(OCBT_DOMAIN_DATA_FINALIZE, self.block_counter);
-        match final_in {
-            OcbtFinalBlock::Whole(in_ptext_blk) => {
+        match (final_out, final_in) {
+            (OcbtFinalBlockMut::Whole(out_ctext_blk), OcbtFinalBlock::Whole(in_ptext_blk)) => {
                 // 1. Encrypt the plaintext.
-                self.tf.encipher_2(block_out, in_ptext_blk);
+                self.tf.encipher_2(out_ctext_blk, in_ptext_blk);
                 // 2. Update data accumulator with plaintext for authentication.
                 for i in 0usize..NUM_BLOCK_WORDS {
                     self.data_acc[i] ^= in_ptext_blk[i];
                 }
             },
-            OcbtFinalBlock::Partial(in_ptext_bytes) => {
+            (OcbtFinalBlockMut::Partial(out_ctext_bytes), OcbtFinalBlock::Partial(in_ptext_bytes)) => {
+                if out_ctext_bytes.len() != in_ptext_bytes.len() {
+                    panic!("out_ctext_bytes.len() != in_ptext_bytes.len()!");
+                }
                 let len = in_ptext_bytes.len();
-
-                // 1. Build padded plaintext into @tmp.
+                // 1. Derive an "XOR-Pad" by encrypting all zero.
+                let zeroes: [u64; NUM_BLOCK_WORDS] = [0u64; NUM_BLOCK_WORDS];
+                self.tf.encipher_2(tmp, &zeroes);
                 {
-                    let tmp_bytes: &mut [u8; NUM_BLOCK_BYTES] = unsafe {
+                    // 2. XOR the XOR-Pad with the plaintext bytes and write to @out_ctext_bytes.
+                    let tmp_bytes = unsafe {
                         &mut *(tmp as *mut [u64; NUM_BLOCK_WORDS] as *mut [u8; NUM_BLOCK_BYTES])
                     };
-                    // Copy partial plaintext.
-                    tmp_bytes[..len].copy_from_slice(in_ptext_bytes);
-                    // Append 0x80.
+                    for i in 0usize..len {
+                        out_ctext_bytes[i] = tmp_bytes[i] ^ in_ptext_bytes[i];
+                    }
+                    // 3. Pad then authenticate the plaintext.
+                    tmp_bytes[..len].copy_from_slice(&in_ptext_bytes);
                     tmp_bytes[len] = 0x80u8;
-                    // Zero-pad the rest.
-                    for b in &mut tmp_bytes[len + 1..] {
-                        *b = 0u8;
+                    tmp_bytes[len + 1 ..].fill(0u8);
+                    for i in 0usize..NUM_BLOCK_WORDS {
+                        self.data_acc[i] ^= tmp[i];
                     }
                 }
-                // 2. Update data accumulator with padded plaintext for authentication.
-                for i in 0usize..NUM_BLOCK_WORDS {
-                    self.data_acc[i] ^= tmp[i];
-                }
-                // 3. Encrypt padded plaintext into the output block.
-                self.tf.encipher_2(block_out, tmp);
+            },
+            _ => {
+                panic!("OcbtFinalBlockMut/OcbtFinalBlock Mismatch!");
             },
         }
         // Increment the unified block counter.
@@ -1464,7 +1466,7 @@ impl Threefish512Ocbt {
                 // 3. Interpret the temporary buffer as bytes and copy them out as plaintext.
                 let tmp_bytes = unsafe {
                     &*(tmp as *const [u64; NUM_BLOCK_WORDS] as *const [u8; NUM_BLOCK_BYTES])
-                }
+                };
                 ptext_bytes_out.copy_from_slice(&tmp_bytes[..len]);
             },
         }
@@ -1473,6 +1475,7 @@ impl Threefish512Ocbt {
     }
 
     //TODO: DELETE_ME
+    /*
     fn decrypt_final_block(
         &mut self,
         final_out: OcbtFinalBlockMut,
@@ -1515,6 +1518,7 @@ impl Threefish512Ocbt {
             }
         }
     }
+    */
 
     fn finalize_tag(
         &mut self,
