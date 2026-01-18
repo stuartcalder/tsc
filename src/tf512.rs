@@ -1308,7 +1308,7 @@ impl Threefish512Ocbt {
     {
         self.set_tweak(OCBT_DOMAIN_DATA_FINALIZE, self.block_counter);
         match (final_out, final_in) {
-             // ---------------- Whole final block ---------------------------------
+             // <---------------- Whole final block --------------------------------->
              (OcbtFinalBlockMut::Whole(out_blk), OcbtFinalBlock::Whole(in_blk)) => {
                  // 1. Encrypt the plaintext.
                  self.tf.encipher_2(out_blk, in_blk);
@@ -1319,7 +1319,7 @@ impl Threefish512Ocbt {
                  // 3. Increment unified block counter.
                  self.block_counter += 1;
              },
-             // ---------------- Partial final block ---------------------------------
+             // <---------------- Partial final block --------------------------------->
              (OcbtFinalBlockMut::Partial(out_bytes), OcbtFinalBlock::Partial(in_bytes)) => {
                  if out_bytes.len() != in_bytes.len() {
                      panic!("out_bytes.len() != in_bytes.len()!");
@@ -1360,7 +1360,69 @@ impl Threefish512Ocbt {
              },
              _ => {
                  panic!("encrypt_final_block() given different input and output block sizes!");
-             }
+             },
+        }
+    }
+
+    //TODO: VERIFY
+    fn decrypt_full_block(
+        &mut self,
+        block_out: &mut [u64; NUM_BLOCK_WORDS],
+        block_in:  &[u64; NUM_BLOCK_WORDS])
+    {
+        // 1. Set the tweak for deciphering payload.
+        self.set_tweak(OCBT_DOMAIN_DATA, self.block_counter);
+        // 2. Decrypt the plaintext block.
+        self.tf.decipher_2(block_out, block_in);
+        // 3. Update the data accumulator using the plaintext for authentication.
+        for i in 0usize..NUM_BLOCK_WORDS {
+            self.data_acc[i] ^= block_out[i];
+        }
+        // 4. Increment the unified block counter.
+        self.block_counter += 1;
+    }
+
+    //TODO: VERIFY
+    fn decrypt_final_block(
+        &mut self,
+        final_out: OcbtFinalBlockMut,
+        tmp:       &mut [u64; NUM_BLOCK_WORDS],
+        final_in:  OcbtFinalBlock)
+    {
+        self.set_tweak(OCBT_DOMAIN_DATA_FINALIZE, self.block_counter);
+        match (final_out, final_in) {
+             // <---------------- Whole final block --------------------------------->
+            (OcbtFinalBlockMut::Whole(out_ptext_blk), OcbtFinalBlock::Whole(in_ctext_blk)) => {
+                // 1. Decrypt the plaintext.
+                self.tf.decipher_2(out_ptext_blk, in_ctext_blk);
+                // 2. Update data accumulator with plaintext for authentication.
+                for i in 0usize..NUM_BLOCK_WORDS {
+                    self.data_acc[i] ^= out_ptext_blk[i];
+                }
+                // 3. Increment unified block counter.
+                self.block_counter += 1;
+            },
+             // <---------------- Partial final block --------------------------------->
+            (OcbtFinalBlockMut::Partial(out_ptext_bytes), OcbtFinalBlock::Partial(in_ctext_bytes)) => {
+                if out_ptext_bytes.len() != in_ctext_bytes.len() {
+                    panic!("out_ptext_bytes.len() != in_ctext_bytes.len()!");
+                }
+
+                let len = in_ctext_bytes.len();
+
+                // 1. Decrypt the ciphertext into @tmp.
+                {
+                    let tmp_bytes: &mut [u8; NUM_BLOCK_BYTES] = unsafe {
+                        &mut *(tmp as *mut [u64; NUM_BLOCK_WORDS] as *mut [u8; NUM_BLOCK_BYTES])
+                    };
+                    //TODO
+                }
+
+                //TODO
+            },
+            _ => {
+                panic!("decrypt_final_block() given different input and output block sizes!");
+            }
         }
     }
 
@@ -1409,7 +1471,8 @@ impl Threefish512Ocbt {
     }
 
     pub fn seal(
-        ct_out: &mut [u8],
+        &mut self,
+        ct_out: Option<&mut [u8]>,
         tag_out: &mut [u8; OCBT_TAG_BYTES],
         key:   &[u64; NUM_KEY_WORDS],
         nonce: u64,
@@ -1418,4 +1481,19 @@ impl Threefish512Ocbt {
     {
         //TODO
     }
+
+    pub fn open(
+        &mut self,
+        pt_out: &mut [u8],
+        key: &[u64; NUM_KEY_WORDS],
+        nonce: u64,
+        ad: Option<&[u8]>,
+        ct: &[u8],
+        tag: &[u8; OCBT_TAG_BYTES]
+    ) -> Result<(), OcbtAuthError> {
+        //TODO
+        Ok(())
+    }
+
+        
 }
