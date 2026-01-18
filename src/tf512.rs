@@ -49,6 +49,8 @@ pub const OCBT_DOMAIN_DATA_FINALIZE: u64 = 0b10u64; /// Finalizing payload proce
 pub const OCBT_DOMAIN_TAG: u64           = 0b11u64; /// Creating the authentication tag.
 pub const OCBT_TAG_WORDS: usize = 8;
 pub const OCBT_TAG_BYTES: usize = 64;
+/// Partial block finalization in OCB-T requires enciphering an all zero block for an XOR-Pad.
+pub static OCBT_ZERO_BLOCK: [u64; NUM_BLOCK_WORDS]  = [0u64; NUM_BLOCK_WORDS];
 
 pub enum OcbtAuthError {
     TagMismatch,
@@ -1323,8 +1325,7 @@ impl Threefish512Ocbt {
                 }
                 let len = in_ptext_bytes.len();
                 // 1. Derive an "XOR-Pad" by encrypting all zero.
-                let zeroes: [u64; NUM_BLOCK_WORDS] = [0u64; NUM_BLOCK_WORDS];
-                self.tf.encipher_2(tmp, &zeroes);
+                self.tf.encipher_2(tmp, &OCBT_ZERO_BLOCK);
                 {
                     // 2. XOR the XOR-Pad with the plaintext bytes and write to @out_ctext_bytes.
                     let tmp_bytes = unsafe {
@@ -1350,175 +1351,74 @@ impl Threefish512Ocbt {
         self.block_counter += 1;
     }
 
-    //TODO: DELETE_ME
-    /*
-    fn encrypt_final_block(
-        &mut self,
-        final_out: OcbtFinalBlockMut,
-        tmp:       &mut [u64; NUM_BLOCK_WORDS],
-        final_in:  OcbtFinalBlock)
-    {
-        self.set_tweak(OCBT_DOMAIN_DATA_FINALIZE, self.block_counter);
-        match (final_out, final_in) {
-             // <---------------- Whole final block --------------------------------->
-             (OcbtFinalBlockMut::Whole(out_blk), OcbtFinalBlock::Whole(in_blk)) => {
-                 // 1. Encrypt the plaintext.
-                 self.tf.encipher_2(out_blk, in_blk);
-                 // 2. Update data accumulator with plaintext for authentication.
-                 for i in 0usize..NUM_BLOCK_WORDS {
-                     self.data_acc[i] ^= in_blk[i];
-                 }
-                 // 3. Increment unified block counter.
-                 self.block_counter += 1;
-             },
-             // <---------------- Partial final block --------------------------------->
-             (OcbtFinalBlockMut::Partial(out_bytes), OcbtFinalBlock::Partial(in_bytes)) => {
-                 if out_bytes.len() != in_bytes.len() {
-                     panic!("out_bytes.len() != in_bytes.len()!");
-                 }
-
-                 let plen = in_bytes.len();
-
-                 // 1. Build padded plaintext into @tmp.
-                 {
-                     let tmp_bytes: &mut [u8; NUM_BLOCK_BYTES] = unsafe {
-                         &mut *(tmp as *mut [u64; NUM_BLOCK_WORDS] as *mut [u8; NUM_BLOCK_BYTES])
-                     };
-                     // Copy partial plaintext.
-                     tmp_bytes[..plen].copy_from_slice(in_bytes);
-                     // Append 0x80.
-                     tmp_bytes[plen] = 0x80u8;
-                     // Zero-pad the rest.
-                     for b in &mut tmp_bytes[plen + 1..] {
-                         *b = 0u8;
-                     }
-                 }
-                 // 2. Update data accumulator with padded plaintext for authentication.
-                 for i in 0usize..NUM_BLOCK_WORDS {
-                     self.data_acc[i] ^= tmp[i];
-                 }
-
-                 // 3. Encrypt padded plaintext in place.
-                 self.tf.encipher_1(tmp);
-
-                 // 4. Ciphertext is the first @plen bytes of encrypted @tmp.
-                 let enc_bytes: &[u8; NUM_BLOCK_BYTES] = unsafe {
-                     &*(&*tmp as *const [u64; NUM_BLOCK_WORDS] as *const [u8; NUM_BLOCK_BYTES])
-                 };
-                 out_bytes.copy_from_slice(&enc_bytes[..plen]);
-
-                 // 5. Increment counter.
-                 self.block_counter += 1;
-             },
-             _ => {
-                 panic!("encrypt_final_block() given different input and output block sizes!");
-             },
-        }
-    }
-    */
-
-    //TODO: VERIFY
     fn decrypt_full_block(
         &mut self,
-        block_out: &mut [u64; NUM_BLOCK_WORDS],
-        block_in:  &[u64; NUM_BLOCK_WORDS])
+        ptext_block_out: &mut [u64; NUM_BLOCK_WORDS],
+        ctext_block_in:  &[u64; NUM_BLOCK_WORDS])
     {
         // 1. Set the tweak for deciphering payload.
         self.set_tweak(OCBT_DOMAIN_DATA, self.block_counter);
         // 2. Decrypt the ciphertext block.
-        self.tf.decipher_2(block_out, block_in);
+        self.tf.decipher_2(ptext_block_out, ctext_block_in);
         // 3. Update the data accumulator using the plaintext for authentication.
         for i in 0usize..NUM_BLOCK_WORDS {
-            self.data_acc[i] ^= block_out[i];
+            self.data_acc[i] ^= ptext_block_out[i];
         }
         // 4. Increment the unified block counter.
         self.block_counter += 1;
     }
 
-    //TODO: VERIFY
     fn decrypt_final_block(
         &mut self,
         final_out: OcbtFinalBlockMut,
         tmp:       &mut [u64; NUM_BLOCK_WORDS],
-        final_in:      &[u64; NUM_BLOCK_WORDS])
+        final_in:  OcbtFinalBlock)
     {
         // Set the tweak for deciphering payload.
         self.set_tweak(OCBT_DOMAIN_DATA_FINALIZE, self.block_counter);
-        match final_out {
+        match (final_out, final_in) {
             // <---------------- Whole final block (no padding) -------------------->
-            OcbtFinalBlockMut::Whole(ptext_block_out) => {
+            (OcbtFinalBlockMut::Whole(ptext_block_out), OcbtFinalBlock::Whole(ctext_block_in)) => {
                 // 1. Decrypt the ciphertext block.
-                self.tf.decipher_2(ptext_block_out, final_in);
+                self.tf.decipher_2(ptext_block_out, ctext_block_in);
                 // 2. Update the data accumulator using the plaintext for authentication.
                 for i in 0usize..NUM_BLOCK_WORDS {
                     self.data_acc[i] ^= ptext_block_out[i];
                 }
             },
             // <---------------- Partial final block (with padding) ------------------>
-            OcbtFinalBlockMut::Partial(ptext_bytes_out) => {
+            (OcbtFinalBlockMut::Partial(ptext_bytes_out), OcbtFinalBlock::Partial(ctext_bytes_in)) => {
+                if ptext_bytes_out.len() != ctext_bytes_in.len() {
+                    panic!("ptext_bytes_out.len() != ctext_bytes_in.len()!")
+                }
                 let len = ptext_bytes_out.len();
-                // 1. Decrypt the ciphertext into the temporary buffer.
-                self.tf.decipher_2(tmp, final_in);
-                // 2. Update the data accumulator using the plaintext for authentication.
+                // 1. Derive an "XOR-Pad" by encrypting all zero.
+                self.tf.encipher_2(tmp, &OCBT_ZERO_BLOCK);
+                // 2. XOR the XOR-Pad with the ciphertext bytes and write to @ptext_bytes_out.
+                {
+                    let tmp_bytes = unsafe {
+                        &mut *(tmp as *mut [u64; NUM_BLOCK_WORDS] as *mut [u8; NUM_BLOCK_BYTES])
+                    };
+                    for i in 0usize..len {
+                        ptext_bytes_out[i] = tmp_bytes[i] ^ ctext_bytes_in[i];
+                    }
+                    // 3. Pad the plaintext.
+                    tmp_bytes[..len].copy_from_slice(ptext_bytes_out);
+                    tmp_bytes[len] = 0x80u8;
+                    tmp_bytes[len + 1 ..].fill(0u8);
+                }
+                // 4. Authenticate the padded plaintext.
                 for i in 0usize..NUM_BLOCK_WORDS {
                     self.data_acc[i] ^= tmp[i];
                 }
-                // 3. Interpret the temporary buffer as bytes and copy them out as plaintext.
-                let tmp_bytes = unsafe {
-                    &*(tmp as *const [u64; NUM_BLOCK_WORDS] as *const [u8; NUM_BLOCK_BYTES])
-                };
-                ptext_bytes_out.copy_from_slice(&tmp_bytes[..len]);
+            },
+            _ => {
+                panic!(""); //TODO
             },
         }
         // Increment the unified block counter.
         self.block_counter += 1;
     }
-
-    //TODO: DELETE_ME
-    /*
-    fn decrypt_final_block(
-        &mut self,
-        final_out: OcbtFinalBlockMut,
-        tmp:       &mut [u64; NUM_BLOCK_WORDS],
-        final_in:  OcbtFinalBlock)
-    {
-        self.set_tweak(OCBT_DOMAIN_DATA_FINALIZE, self.block_counter);
-        match (final_out, final_in) {
-            // <---------------- Whole final block (no padding) -------------------->
-            (OcbtFinalBlockMut::Whole(out_ptext_blk), OcbtFinalBlock::Whole(in_ctext_blk)) => {
-                // 1. Decrypt the plaintext.
-                self.tf.decipher_2(out_ptext_blk, in_ctext_blk);
-                // 2. Update data accumulator with plaintext for authentication.
-                for i in 0usize..NUM_BLOCK_WORDS {
-                    self.data_acc[i] ^= out_ptext_blk[i];
-                }
-                // 3. Increment unified block counter.
-                self.block_counter += 1;
-            },
-            // <---------------- Partial final block (with padding) ------------------>
-            (OcbtFinalBlockMut::Partial(out_ptext_bytes), OcbtFinalBlock::Partial(in_ctext_bytes)) => {
-                if out_ptext_bytes.len() != in_ctext_bytes.len() {
-                    panic!("out_ptext_bytes.len() != in_ctext_bytes.len()!");
-                }
-
-                let len = in_ctext_bytes.len();
-
-                // 1. Decrypt the ciphertext into @tmp.
-                {
-                    let tmp_bytes: &mut [u8; NUM_BLOCK_BYTES] = unsafe {
-                        &mut *(tmp as *mut [u64; NUM_BLOCK_WORDS] as *mut [u8; NUM_BLOCK_BYTES])
-                    };
-                    //TODO
-                }
-
-                //TODO
-            },
-            _ => {
-                panic!("decrypt_final_block() given different input and output block sizes!");
-            }
-        }
-    }
-    */
 
     fn finalize_tag(
         &mut self,
