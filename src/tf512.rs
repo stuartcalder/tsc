@@ -16,6 +16,8 @@
 */
 #![allow(unused)] // FIXME: Remove me.
 
+use rssc::op::secure_zero;
+
 pub const NUM_BLOCK_BITS: usize  = 512;
 pub const NUM_BLOCK_BYTES: usize = 64;
 pub const NUM_BLOCK_WORDS: usize = 8;
@@ -690,6 +692,26 @@ macro_rules! xor_64 {
          */
     }
 }
+macro_rules! block_as_u8 {
+    ($blk:expr) => {unsafe {
+        &*($blk.as_ptr() as *const [u8; NUM_BLOCK_BYTES])
+    }}
+}
+macro_rules! block_as_u8_mut {
+    ($blk:expr) => {unsafe {
+        &mut *($blk.as_mut_ptr() as *mut [u8; NUM_BLOCK_BYTES])
+    }}
+}
+macro_rules! block_as_u64 {
+    ($blk:expr) => {unsafe {
+        &*($blk.as_ptr() as *const [u64; NUM_BLOCK_WORDS])
+    }}
+}
+macro_rules! block_as_u64_mut {
+    ($blk:expr) => {unsafe {
+        &mut *($blk.as_mut_ptr() as *mut [u64; NUM_BLOCK_WORDS])
+    }}
+}
 
 fn compute_tweak_parity_word(tweak: &mut [u64])
 {
@@ -1250,39 +1272,31 @@ impl Threefish512Ocbt {
         self.block_counter += 1;
     }
 
-    fn process_ad_block_final(
+    fn process_ad_block_final_partial(
         &mut self,
         tmp: &mut [u64; NUM_BLOCK_WORDS],
-        final_block: OcbtFinalBlock)
+        partial: &[u8])
     {
-        match final_block {
-            OcbtFinalBlock::Whole(whole) => {
-                // No difference in processing the final block if it's whole.
-                self.process_ad_block_full(tmp, whole);
-            },
-            OcbtFinalBlock::Partial(partial) => {
-                // 1. Set the tweak for enciphering additional data.
-                self.set_tweak(OCBT_DOMAIN_AD, self.block_counter);
-                let tmp_bytes: &mut [u8; NUM_BLOCK_BYTES] = unsafe {
-                    &mut *(tmp as *mut [u64; NUM_BLOCK_WORDS] as *mut [u8; NUM_BLOCK_BYTES])
-                };
-                // 2. Copy the partial bytes directly into @tmp_bytes.
-                let plen = partial.len();
-                tmp_bytes[..plen].copy_from_slice(partial);
-                // 3. Append 0x80.
-                tmp_bytes[plen] = 0x80u8;
-                // 4. Zero-pad the remainder.
-                tmp_bytes[plen + 1 ..].fill(0u8);
-                // 5. Run Threefish512 on the padded block
-                self.tf.encipher_1(tmp);
-                // 6. XOR into AD accumulator.
-                for i in 0usize..NUM_BLOCK_WORDS {
-                    self.ad_acc[i] ^= tmp[i];
-                }
-                // 7. Increment the unified block counter.
-                self.block_counter += 1;
-            },
+        // 1. Set the tweak for enciphering additional data.
+        self.set_tweak(OCBT_DOMAIN_AD, self.block_counter);
+        {
+            let tmp_bytes = block_as_u8_mut!(tmp);
+            // 2. Copy the partial bytes directly into @tmp_bytes.
+            let plen = partial.len();
+            tmp_bytes[..plen].copy_from_slice(partial);
+            // 3. Append 0x80.
+            tmp_bytes[plen] = 0x80u8;
+            // 4. Zero-pad the remainder.
+            tmp_bytes[plen + 1 ..].fill(0u8);
         }
+        // 5. Run Threefish512 on the padded block
+        self.tf.encipher_1(tmp);
+        // 6. XOR into AD accumulator.
+        for i in 0usize..NUM_BLOCK_WORDS {
+            self.ad_acc[i] ^= tmp[i];
+        }
+        // 7. Increment the unified block counter.
+        self.block_counter += 1;
     }
 
     fn encrypt_full_block(
@@ -1328,9 +1342,7 @@ impl Threefish512Ocbt {
                 self.tf.encipher_2(tmp, &OCBT_ZERO_BLOCK);
                 {
                     // 2. XOR the XOR-Pad with the plaintext bytes and write to @out_ctext_bytes.
-                    let tmp_bytes = unsafe {
-                        &mut *(tmp as *mut [u64; NUM_BLOCK_WORDS] as *mut [u8; NUM_BLOCK_BYTES])
-                    };
+                    let tmp_bytes = block_as_u8_mut!(tmp);
                     for i in 0usize..len {
                         out_ctext_bytes[i] = tmp_bytes[i] ^ in_ptext_bytes[i];
                     }
@@ -1396,9 +1408,7 @@ impl Threefish512Ocbt {
                 self.tf.encipher_2(tmp, &OCBT_ZERO_BLOCK);
                 // 2. XOR the XOR-Pad with the ciphertext bytes and write to @ptext_bytes_out.
                 {
-                    let tmp_bytes = unsafe {
-                        &mut *(tmp as *mut [u64; NUM_BLOCK_WORDS] as *mut [u8; NUM_BLOCK_BYTES])
-                    };
+                    let tmp_bytes = block_as_u8_mut!(tmp);
                     for i in 0usize..len {
                         ptext_bytes_out[i] = tmp_bytes[i] ^ ctext_bytes_in[i];
                     }
@@ -1437,24 +1447,120 @@ impl Threefish512Ocbt {
         self.tf.encipher_1(tmp);
 
         // 4. Export as bytes.
-        let tmp_bytes: &[u8; NUM_BLOCK_BYTES] = unsafe {
-            &*(tmp as *const [u64; NUM_BLOCK_WORDS] as *const [u8; NUM_BLOCK_BYTES])
-        };
+        let tmp_bytes = block_as_u8!(tmp);
         tag_out.copy_from_slice(tmp_bytes);
         
         // We don't bother bumping the counter since this function is terminal.
     }
 
     pub fn absorb_ad(&mut self, ad: &[u8]) {
-        //TODO
-        // split into full 64-byte blocks → process_ad_block_full
-        // final partial block → process_ad_block_final
+        let mut i         = 0usize;
+        let mut tmp       = [0u64; NUM_BLOCK_WORDS];
+        let mut block_u64 = [0u64; NUM_BLOCK_WORDS];
+
+        // 1. Process full 64-byte blocks.
+        while i + NUM_BLOCK_BYTES <= ad.len() {
+            let block_u8 = block_as_u8_mut!(block_u64);
+            block_u8.copy_from_slice(&ad[i .. i + NUM_BLOCK_BYTES]);
+            self.process_ad_block_full(&mut tmp, &block_u64);
+            i += NUM_BLOCK_BYTES;
+        }
+
+        // 2. Process final partial block (if there are any leftover).
+        let final_partial = &ad[i..];
+        if !final_partial.is_empty() {
+            self.process_ad_block_final_partial(&mut tmp, final_partial);
+        }
+
+        // 3. Clean-up.
+        secure_zero(&mut tmp);
+        secure_zero(&mut block_u64);
     }
 
+    //TODO
     pub fn encrypt(&mut self, ct_out: &mut [u8], pt: &[u8]) {
-        //TODO
-        // full blocks -> encrypt_full_block
-        // final partial -> encrypt_final_block
+        let mut tmp           = [0u64; NUM_BLOCK_WORDS];
+        let mut block_u64_in  = [0u64; NUM_BLOCK_WORDS];
+        let mut block_u64_out = [0u64; NUM_BLOCK_WORDS];
+
+        if ct_out.len() != pt.len() {
+            panic!("ct_out.len() != pt.len()!");
+        }
+
+        let len = pt.len();
+        // Finalize now if there's one block or less.
+        if len <= NUM_BLOCK_BYTES {
+            let (output, input) = match len {
+                NUM_BLOCK_BYTES => {
+                    // Copy the plaintext into the aligned input buffer.
+                    block_as_u8_mut!(block_u64_in).copy_from_slice(&pt[..NUM_BLOCK_BYTES]);
+                    // Pass the input and output buffers.
+                    (OcbtFinalBlockMut::Whole(&mut block_u64_out),
+                     OcbtFinalBlock::Whole(&block_u64_in))
+                },
+                _ => {
+                    let block_u8_in  = block_as_u8_mut!(block_u64_in);
+                    let block_u8_out = block_as_u8_mut!(block_u64_out);
+                    // Copy the plaintext into the aligned input buffer.
+                    block_u8_in[..len].copy_from_slice(pt);
+                    // Pass the input and output buffers.
+                    (OcbtFinalBlockMut::Partial(&mut block_u8_out[..len]),
+                     OcbtFinalBlock::Partial(&block_u8_in[..len]))
+                },
+            };
+            // Encrypt the input buffer into the output buffer.
+            self.encrypt_final_block(output, &mut tmp, input);
+            // Copy the requested number of bytes out into the ciphertext buffer.
+            ct_out.copy_from_slice(&block_as_u8!(block_u64_out)[..len]);
+            // Cleanup.
+            secure_zero(&mut tmp);
+            secure_zero(&mut block_u64_in);
+            secure_zero(&mut block_u64_out);
+            return;
+        } // ~ if len <= NUM_BLOCK_BYTES
+
+        // Getting here implies there are at least two blocks.
+        // We're checking for strictly less than the length so we can handle the final block
+        // explicitly, lastly.
+        let mut i = 0usize;
+        while i + NUM_BLOCK_BYTES < len {
+            // Copy 64 bytes into the aligned input buffer.
+            block_as_u8_mut!(block_u64_in).copy_from_slice(&pt[i .. i + NUM_BLOCK_BYTES]);
+            // Encrypt the input buffer into the output buffer.
+            self.encrypt_full_block(&mut block_u64_out, &block_u64_in);
+            // Copy 64 bytes out of the aligned output buffer into @ct_out for the caller.
+            ct_out[i .. i + NUM_BLOCK_BYTES].copy_from_slice(block_as_u8!(block_u64_out));
+            // Increment the byte counter.
+            i += NUM_BLOCK_BYTES;
+        }
+
+        // We have reached the final block.
+        // Copy the plaintext into the aligned input buffer.
+        let remain = len - i;
+        block_as_u8_mut!(block_u64_in)[..remain].copy_from_slice(&pt[i..]);
+        let (output, input) = match remain {
+            NUM_BLOCK_BYTES => {
+                // Last block is whole. Pass the input and output u64 buffers.
+                (OcbtFinalBlockMut::Whole(&mut block_u64_out), OcbtFinalBlock::Whole(&block_u64_in))
+            },
+            _ => {
+                // last black is partial. Pass the input and output u8 buffers.
+                (OcbtFinalBlockMut::Partial(
+                    &mut block_as_u8_mut!(block_u64_out)[..remain]
+                ),
+                OcbtFinalBlock::Partial(
+                    &block_as_u8!(block_u64_in)[..remain]
+                ))
+            },
+        };
+        // Encrypt the input buffer into the output buffer.
+        self.encrypt_final_block(output, &mut tmp, input);
+        // Copy the requested number of bytes out into the ciphertext buffer.
+        ct_out[i .. i + remain].copy_from_slice(&block_as_u8!(block_u64_out)[..remain]);
+        // Cleanup.
+        secure_zero(&mut tmp);
+        secure_zero(&mut block_u64_in);
+        secure_zero(&mut block_u64_out);
     }
 
     pub fn decrypt(&mut self, pt_out: &mut [u8], ct: &[u8]) {
