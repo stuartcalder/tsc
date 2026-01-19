@@ -1731,37 +1731,205 @@ mod ocbt_tests {
         }
     }
 
+    enum Handle {
+        SEAL,
+        OPEN
+    }
+
+    fn handle(res: Result<(), OcbtError>, hnd: Handle) {
+        match hnd {
+            Handle::SEAL => {
+                match res {
+                    Ok(_) => {},
+                    Err(OcbtError::InvalidLength) => {
+                        panic!("ocbt.seal() failed with InvalidLength!");
+                    },
+                    Err(OcbtError::TagMismatch) => {
+                        panic!("ocbt.seal() failed with a TagMismatch error! It's not even supposed to be capable of returning that!");
+                    },
+                }
+            },
+            Handle::OPEN => {
+                match res {
+                    Ok(_) => {},
+                    Err(OcbtError::InvalidLength) => {
+                        panic!("ocbt.open() failed with InvalidLength!");
+                    },
+                    Err(OcbtError::TagMismatch) => {
+                        panic!("ocbt.open() failed with a TagMismatch error!");
+                    },
+                }
+            },
+        }
+    }
+
+    // 1. Empty AD + Empty PT.
     #[test]
     fn test_empty_ad_empty_pt() {
-        let mut ocbt = Threefish512Ocbt::new();
-        let key   = [0u64; NUM_KEY_WORDS];
-        let nonce = 0x1111_2222_3333_4444u64;
+        let mut ocbt  = Threefish512Ocbt::new();
+        let key       = [0u64; NUM_KEY_WORDS];
+        let nonce     = 0x1111_2222_3333_4444u64;
         let ad: &[u8] = &[];
         let pt: &[u8] = &[];
         let mut ct: &mut [u8] = &mut [];
         let mut tag = [0u8; OCBT_TAG_BYTES];
 
-        match ocbt.seal(ct, &mut tag, &key, nonce, ad, pt) {
-            Err(OcbtError::InvalidLength) => {
-                panic!("ocbt.seal() failed with InvalidLength!");
-            },
-            Err(OcbtError::TagMismatch) => {
-                panic!("ocbt.seal() failed with a TagMismatch error! It's not even supposed to be capable of returning that!");
-            }
-            Ok(_) => {},
-        }
+        let res = ocbt.seal(ct, &mut tag, &key, nonce, ad, pt);
+        handle(res, Handle::SEAL);
         let mut ocbt2 = Threefish512Ocbt::new();
         let mut out: &mut[u8] = &mut[];
 
-        match ocbt2.open(out, &key, nonce, ad, ct, &mut tag) {
-            Err(OcbtError::InvalidLength) => {
-                panic!("ocbt.open() failed with InvalidLength!");
-            },
-            Err(OcbtError::TagMismatch) => {
-                panic!("ocbt.open() failed with a TagMismatch!");
-            }
-            Ok(_) => {},
+        let res2 = ocbt2.open(out, &key, nonce, ad, ct, &mut tag);
+        handle(res2, Handle::OPEN);
+    }
+
+    // 2. Empty AD + non-empty PT.
+    #[test]
+    fn empty_ad_nonempty_pt() {
+        let mut ocbt = Threefish512Ocbt::new();
+        let key      = [1u64; NUM_KEY_WORDS];
+        let nonce    = 0xABCD_EF01_2345_6789u64;
+
+        let ad = &[];
+        let pt = b"Hello world!";
+        let mut ct  = vec![0u8; pt.len()];
+        let mut tag = [0u8; OCBT_TAG_BYTES];
+
+        let res = ocbt.seal(&mut ct, &mut tag, &key, nonce, ad, pt);
+        handle(res, Handle::SEAL);
+
+        let mut ocbt2 = Threefish512Ocbt::new();
+        let mut out   = vec![0u8; pt.len()];
+        let res2      = ocbt2.open(&mut out, &key, nonce, ad, &ct, &tag);
+        handle(res2, Handle::OPEN);
+
+        assert_eq!(out, pt);
+    }
+
+    // 3. Non-empty AD + empty PT.
+    #[test]
+    fn nonempty_ad_empty_pt() {
+        let mut ocbt = Threefish512Ocbt::new();
+        let key   = [2u64; NUM_KEY_WORDS];
+        let nonce = 0xDEAD_BEEF_DEAD_BEEF;
+
+        let ad = b"metadata";
+        let pt = &[];
+        let mut ct = [];
+        let mut tag = [0u8; OCBT_TAG_BYTES];
+
+        let res = ocbt.seal(&mut ct, &mut tag, &key, nonce, ad, pt);
+        handle(res, Handle::SEAL);
+
+        let mut ocbt2 = Threefish512Ocbt::new();
+        let mut out = [];
+        
+        let res2 = ocbt2.open(&mut out, &key, nonce, ad, &ct, &tag);
+        handle(res2, Handle::OPEN);
+    }
+
+    // 4. Multi-block plaintext.
+    #[test]
+    fn multiblock_pt() {
+        let mut ocbt = Threefish512Ocbt::new();
+        let key     = [3u64; NUM_KEY_WORDS];
+        let nonce   = 0xCAFEBABECAFEBABE;
+
+        let mut pt = vec![0u8; 200];
+        fill_rand(&mut pt, 12345u64);
+
+        let ad = b"header";
+        let mut ct = vec![0u8; pt.len()];
+        let mut tag = [0u8; OCBT_TAG_BYTES];
+
+        let res = ocbt.seal(&mut ct, &mut tag, &key, nonce, ad, &pt);
+        handle(res, Handle::SEAL);
+
+        let mut ocbt2 = Threefish512Ocbt::new();
+        let mut out   = vec![0u8; pt.len()];
+        let res2 = ocbt2.open(&mut out, &key, nonce, ad, &ct, &tag);
+        handle(res2, Handle::OPEN);
+
+        assert_eq!(out, pt);
+    }
+
+    // 5. Payload tampering detection.
+    #[test]
+    fn payload_tamper_detection() {
+        let mut ocbt = Threefish512Ocbt::new();
+        let key = [4u64; NUM_KEY_WORDS];
+        let nonce = 0x9999_8888_7777_6666u64;
+
+        let pt = b"Attack at dawn";
+        let ad = b"orders";
+        let mut ct = vec![0u8; pt.len()];
+        let mut tag = [0u8; OCBT_TAG_BYTES];
+
+        let res = ocbt.seal(&mut ct, &mut tag, &key, nonce, ad, pt);
+        handle(res, Handle::SEAL);
+
+        ct[0] ^= 0xFFu8;
+
+        let mut ocbt2 = Threefish512Ocbt::new();
+        let mut out   = vec![0u8; pt.len()];
+        let res2      = ocbt2.open(&mut out, &key, nonce, ad, &ct, &tag);
+
+        assert!(matches!(res2, Err(OcbtError::TagMismatch)));
+    }
+
+    // 6. AD tampering detection.
+    #[test]
+    fn ad_tamper_detection() {
+        let mut ocbt = Threefish512Ocbt::new();
+        let key = [5u64; NUM_KEY_WORDS];
+        let nonce = 0x5555_4444_3333_2222u64;
+
+        let pt = b"Attack at dawn";
+        let mut ad = Vec::<u8>::from(b"orders");
+        let mut ct = vec![0u8; pt.len()];
+        let mut tag = [0u8; OCBT_TAG_BYTES];
+
+        let res = ocbt.seal(&mut ct, &mut tag, &key, nonce, &ad, pt);
+        handle(res, Handle::SEAL);
+
+        ad[5] = b'z'; // "orderz"
+
+        let mut ocbt2 = Threefish512Ocbt::new();
+        let mut out   = vec![0u8; pt.len()];
+        let res2      = ocbt2.open(&mut out, &key, nonce, &ad, &ct, &tag);
+
+        assert!(matches!(res2, Err(OcbtError::TagMismatch)));
+    }
+
+    // 7. Randomized round-trip fuzzing.
+    #[test]
+    fn fuzz_roundtrip() {
+        let mut ocbt_0 = Threefish512Ocbt::new();
+        let mut ocbt_1 = Threefish512Ocbt::new();
+
+        let mut key = [0u64; NUM_KEY_WORDS];
+        fill_rand(block_as_u8_mut!(&mut key), 777);
+
+        for i in 0usize..50usize {
+            let nonce = 0xABCD_EF00_0000_0000u64 + i as u64;
+
+            let mut pt = vec![0u8; (i * 13) % 257];
+            fill_rand(&mut pt, i as u64);
+
+            let mut ad = vec![0u8; (i * 7) % 113];
+            fill_rand(&mut ad, (i * 999) as u64);
+
+            let mut ct  = vec![0u8; pt.len()];
+            let mut tag = [0u8; OCBT_TAG_BYTES];
+
+            let res_0 = ocbt_0.seal(&mut ct, &mut tag, &key, nonce, &ad, &pt);
+            handle(res_0, Handle::SEAL);
+
+            let mut out = vec![0u8; pt.len()];
+            let res_1 = ocbt_1.open(&mut out, &key, nonce, &ad, &ct, &tag);
+            handle(res_1, Handle::OPEN);
+
+            assert_eq!(out, pt);
         }
     }
-    //TODO
 }
