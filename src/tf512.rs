@@ -1213,33 +1213,26 @@ enum OcbtFinalBlockMut<'a> {
 }
 
 impl Threefish512Ocbt {
-    /// Create a new OCB-T instance with a 512-bit key and a 62-bit nonce.
-    pub fn new(key: &[u64; NUM_KEY_WORDS_WITH_PARITY], nonce: u64) -> Self {
-        let mut tweak = [0u64; NUM_TWEAK_WORDS_WITH_PARITY];
-
-        // The two domain bits are initially zero.
-        tweak[0] = nonce << 2;
-        // tweak[1] (the block counter) is already initialized to zero.
-
-        let mut tf = Threefish512Dynamic::new(*key, tweak);
-
+    /// Create a new OCB-T instance. Keying material passed on each invocation, not on
+    /// initialization.
+    pub fn new() -> Self {
         Self {
-            nonce,
+            nonce: 0u64,
             block_counter: 0u64,
-            tf,
+            tf: Threefish512Dynamic::default(),
             ad_acc:   [0u64; NUM_BLOCK_WORDS],
             data_acc: [0u64; NUM_BLOCK_WORDS],
         }
     }
 
     #[inline]
-    fn set_tweak(&mut self, domain: u64, counter: u64) {
+    fn set_tweak(&mut self, domain: u64) {
         // domain: low 2 bits of tweak[0]
         // nonce:  stored in self.nonce
         // counter: stored in tweak[1]
 
         let t0 = (self.nonce << 2) | (domain & 0x3);
-        let t1 = counter;
+        let t1 = self.block_counter;
 
         self.tf.tweak[0] = t0.to_le();
         self.tf.tweak[1] = t1.to_le();
@@ -1254,7 +1247,7 @@ impl Threefish512Ocbt {
         block: &[u64; NUM_BLOCK_WORDS])
     {
         // 1. Set the tweak for enciphering additional data.
-        self.set_tweak(OCBT_DOMAIN_AD, self.block_counter);
+        self.set_tweak(OCBT_DOMAIN_AD);
         // 2. Encipher it into the temporary buffer.
         self.tf.encipher_2(tmp, block);
         // 3. XOR the resulting ciphertext into the AD accumulator.
@@ -1271,7 +1264,7 @@ impl Threefish512Ocbt {
         partial: &[u8])
     {
         // 1. Set the tweak for enciphering additional data.
-        self.set_tweak(OCBT_DOMAIN_AD, self.block_counter);
+        self.set_tweak(OCBT_DOMAIN_AD);
         {
             let tmp_bytes = block_as_u8_mut!(tmp);
             // 2. Copy the partial bytes directly into @tmp_bytes.
@@ -1298,7 +1291,7 @@ impl Threefish512Ocbt {
         block_in: &[u64; NUM_BLOCK_WORDS])
     {
         // 1. Set the tweak for enciphering payload.
-        self.set_tweak(OCBT_DOMAIN_DATA, self.block_counter);
+        self.set_tweak(OCBT_DOMAIN_DATA);
         // 2. Encrypt the plaintext block.
         self.tf.encipher_2(block_out, block_in);
         // 3. Update the data accumulator using the plaintext for authentication.
@@ -1316,7 +1309,7 @@ impl Threefish512Ocbt {
         final_in:  OcbtFinalBlock)
     {
         // Set the tweak for finalizing the payload.
-        self.set_tweak(OCBT_DOMAIN_DATA_FINALIZE, self.block_counter);
+        self.set_tweak(OCBT_DOMAIN_DATA_FINALIZE);
         match (final_out, final_in) {
             (OcbtFinalBlockMut::Whole(out_ctext_blk), OcbtFinalBlock::Whole(in_ptext_blk)) => {
                 // 1. Encrypt the plaintext.
@@ -1362,7 +1355,7 @@ impl Threefish512Ocbt {
         ctext_block_in:  &[u64; NUM_BLOCK_WORDS])
     {
         // 1. Set the tweak for deciphering payload.
-        self.set_tweak(OCBT_DOMAIN_DATA, self.block_counter);
+        self.set_tweak(OCBT_DOMAIN_DATA);
         // 2. Decrypt the ciphertext block.
         self.tf.decipher_2(ptext_block_out, ctext_block_in);
         // 3. Update the data accumulator using the plaintext for authentication.
@@ -1380,7 +1373,7 @@ impl Threefish512Ocbt {
         final_in:  OcbtFinalBlock)
     {
         // Set the tweak for deciphering payload.
-        self.set_tweak(OCBT_DOMAIN_DATA_FINALIZE, self.block_counter);
+        self.set_tweak(OCBT_DOMAIN_DATA_FINALIZE);
         match (final_out, final_in) {
             // <---------------- Whole final block (no padding) -------------------->
             (OcbtFinalBlockMut::Whole(ptext_block_out), OcbtFinalBlock::Whole(ctext_block_in)) => {
@@ -1433,7 +1426,7 @@ impl Threefish512Ocbt {
         }
 
         // 2. Set tweak for TAG creation.
-        self.set_tweak(OCBT_DOMAIN_TAG, self.block_counter);
+        self.set_tweak(OCBT_DOMAIN_TAG);
 
         // 3. Encrypt the combined accumulator in place.
         self.tf.encipher_1(&mut tmp);
@@ -1676,7 +1669,6 @@ impl Threefish512Ocbt {
         diff == 0u8
     }
 
-
     pub fn open(
         &mut self,
         pt_out: &mut [u8],
@@ -1713,7 +1705,7 @@ impl Threefish512Ocbt {
         self.finalize_tag(&mut computed_tag);
 
         // 5. Constant-time compare
-        let is_equal = Self::ct_eq(&computed_tag, tag);
+        let is_equal: bool = Self::ct_eq(&computed_tag, tag);
         secure_zero(&mut computed_tag);
         if !is_equal {
             return Err(OcbtError::TagMismatch);
@@ -1722,4 +1714,54 @@ impl Threefish512Ocbt {
         // Successful decryption.
         Ok(())
     }
+}
+
+#[cfg(test)]
+mod ocbt_tests {
+    use super::*;
+
+    // Helper: Generate deterministic pseudo-random bytes.
+    fn fill_rand(buf: &mut [u8], seed: u64) {
+        let mut x = seed;
+        for b in buf {
+            x ^= x << 7;
+            x ^= x >> 9;
+            x ^= x << 8;
+            *b = (x & 0xff) as u8;
+        }
+    }
+
+    #[test]
+    fn test_empty_ad_empty_pt() {
+        let mut ocbt = Threefish512Ocbt::new();
+        let key   = [0u64; NUM_KEY_WORDS];
+        let nonce = 0x1111_2222_3333_4444u64;
+        let ad: &[u8] = &[];
+        let pt: &[u8] = &[];
+        let mut ct: &mut [u8] = &mut [];
+        let mut tag = [0u8; OCBT_TAG_BYTES];
+
+        match ocbt.seal(ct, &mut tag, &key, nonce, ad, pt) {
+            Err(OcbtError::InvalidLength) => {
+                panic!("ocbt.seal() failed with InvalidLength!");
+            },
+            Err(OcbtError::TagMismatch) => {
+                panic!("ocbt.seal() failed with a TagMismatch error! It's not even supposed to be capable of returning that!");
+            }
+            Ok(_) => {},
+        }
+        let mut ocbt2 = Threefish512Ocbt::new();
+        let mut out: &mut[u8] = &mut[];
+
+        match ocbt2.open(out, &key, nonce, ad, ct, &mut tag) {
+            Err(OcbtError::InvalidLength) => {
+                panic!("ocbt.open() failed with InvalidLength!");
+            },
+            Err(OcbtError::TagMismatch) => {
+                panic!("ocbt.open() failed with a TagMismatch!");
+            }
+            Ok(_) => {},
+        }
+    }
+    //TODO
 }

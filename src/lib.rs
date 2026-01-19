@@ -106,9 +106,10 @@ mod tests {
     #[test]
     fn test_skein() {
         use skein512::*;
-        let mut ubi512 = Ubi512::new();
+        use ubi512::*;
+        let mut skein512 = Skein512::new();
         let mut hash_output: [u8; 64] = [0u8; 64];
-        hash_native(&mut ubi512, &mut hash_output, &[]);
+        skein512.hash_native(&mut hash_output, &[]);
         println!("{:?}", hash_output);
     }
 }
