@@ -54,7 +54,7 @@ pub const OCBT_TAG_BYTES: usize = 64;
 /// Partial block finalization in OCB-T requires enciphering an all zero block for an XOR-Pad.
 pub static OCBT_ZERO_BLOCK: [u64; NUM_BLOCK_WORDS]  = [0u64; NUM_BLOCK_WORDS];
 
-pub enum OcbtAuthError {
+pub enum OcbtError {
     TagMismatch,
     InvalidLength
 }
@@ -1641,13 +1641,14 @@ impl Threefish512Ocbt {
         key:     &[u64; NUM_KEY_WORDS], // Input encryption key.
         nonce:   u64,  // UNIQUE 62-bit nonce for tweak differentiation.
         ad:      &[u8], // Additional data to simultaneously authenticate.
-        pt:      &[u8]) // Input plaintext to encipher.
-    {
-        // Size assertion.
+        pt:      &[u8], // Input plaintext to encipher.
+    ) -> Result<(), OcbtError> {
+        // Size check.
         if ct_out.len() != pt.len() {
-            panic!("ct_out.len() != pt.len()!");
+            return Err(OcbtError::InvalidLength);
         }
-        // 1. Reset internal state (block counter, accumulators, load cipher key)
+        // 1. Reset internal state (nonce, block counter, accumulators, load cipher key)
+        self.nonce         = nonce; // Update the UNIQUE nonce.
         self.block_counter = 0u64; // Reset the block counter.
         self.tf.set_key(key);      // Load the cipher key.
         self.ad_acc.fill(0u64);    // Zero the AD accumulator.
@@ -1662,19 +1663,63 @@ impl Threefish512Ocbt {
         }
         // 4. Finalize the authentication tag.
         self.finalize_tag(tag_out);
+        Ok(())
     }
+
+    /// Constant-time byte comparison.
+    fn ct_eq(a: &[u8], b: &[u8]) -> bool {
+        if a.len() != b.len() { return false; }
+        let mut diff = 0u8;
+        for i in 0usize..a.len() {
+            diff |= a[i] ^ b[i];
+        }
+        diff == 0u8
+    }
+
 
     pub fn open(
         &mut self,
         pt_out: &mut [u8],
         key: &[u64; NUM_KEY_WORDS],
         nonce: u64,
-        ad: Option<&[u8]>,
+        ad: &[u8],
         ct: &[u8],
-        tag: &[u8; OCBT_TAG_BYTES]
-    ) -> Result<(), OcbtAuthError> {
-        //TODO
+        tag: &[u8; OCBT_TAG_BYTES],
+    ) -> Result<(), OcbtError> {
+        // Size check.
+        if pt_out.len() != ct.len() {
+            return Err(OcbtError::InvalidLength);
+        }
+
+        // 1. Reset internal state (nonce, block counter, accumulators, load cipher key)
+        self.nonce         = nonce;
+        self.block_counter = 0u64; // Reset the block counter.
+        self.tf.set_key(key); // Load the cipher key.
+        self.ad_acc.fill(0u64); // Zero the AD accumulator.
+        self.data_acc.fill(0u64); // Zero the DATA accumulator.
+
+        // 2. Absorb AD
+        if !ad.is_empty() {
+            self.absorb_ad(ad);
+        }
+
+        // 3. Decrypt ciphertext into @pt_out.
+        if !ct.is_empty() {
+            self.decrypt(pt_out, ct);
+        }
+
+        // 4. Recompute tag
+        let mut computed_tag = [0u8; OCBT_TAG_BYTES];
+        self.finalize_tag(&mut computed_tag);
+
+        // 5. Constant-time compare
+        let is_equal = Self::ct_eq(&computed_tag, tag);
+        secure_zero(&mut computed_tag);
+        if !is_equal {
+            return Err(OcbtError::TagMismatch);
+        }
+
+        // Successful decryption.
         Ok(())
     }
-        
 }
