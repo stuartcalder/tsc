@@ -702,17 +702,8 @@ macro_rules! block_as_u8_mut {
         &mut *($blk.as_mut_ptr() as *mut [u8; NUM_BLOCK_BYTES])
     }}
 }
-macro_rules! block_as_u64 {
-    ($blk:expr) => {unsafe {
-        &*($blk.as_ptr() as *const [u64; NUM_BLOCK_WORDS])
-    }}
-}
-macro_rules! block_as_u64_mut {
-    ($blk:expr) => {unsafe {
-        &mut *($blk.as_mut_ptr() as *mut [u64; NUM_BLOCK_WORDS])
-    }}
-}
 
+#[inline]
 fn compute_tweak_parity_word(tweak: &mut [u64])
 {
     debug_assert!(tweak.len() >= NUM_TWEAK_WORDS_WITH_PARITY);
@@ -724,6 +715,7 @@ fn compute_tweak_parity_word(tweak: &mut [u64])
     }
 }
 
+#[inline]
 fn compute_key_parity_word(key: &mut [u64])
 {
     debug_assert!(key.len() >= NUM_KEY_WORDS_WITH_PARITY);
@@ -744,6 +736,7 @@ fn compute_key_parity_word(key: &mut [u64])
     }
 }
 
+#[inline]
 fn compute_parity_words(
     key:   &mut [u64],
     tweak: &mut [u64])
@@ -1447,8 +1440,7 @@ impl Threefish512Ocbt {
         self.tf.encipher_1(tmp);
 
         // 4. Export as bytes.
-        let tmp_bytes = block_as_u8!(tmp);
-        tag_out.copy_from_slice(tmp_bytes);
+        tag_out.copy_from_slice(block_as_u8!(tmp));
         
         // We don't bother bumping the counter since this function is terminal.
     }
@@ -1460,8 +1452,7 @@ impl Threefish512Ocbt {
 
         // 1. Process full 64-byte blocks.
         while i + NUM_BLOCK_BYTES <= ad.len() {
-            let block_u8 = block_as_u8_mut!(block_u64);
-            block_u8.copy_from_slice(&ad[i .. i + NUM_BLOCK_BYTES]);
+            block_as_u8_mut!(block_u64).copy_from_slice(&ad[i .. i + NUM_BLOCK_BYTES]);
             self.process_ad_block_full(&mut tmp, &block_u64);
             i += NUM_BLOCK_BYTES;
         }
@@ -1477,7 +1468,6 @@ impl Threefish512Ocbt {
         secure_zero(&mut block_u64);
     }
 
-    //TODO
     pub fn encrypt(&mut self, ct_out: &mut [u8], pt: &[u8]) {
         let mut tmp           = [0u64; NUM_BLOCK_WORDS];
         let mut block_u64_in  = [0u64; NUM_BLOCK_WORDS];
@@ -1640,6 +1630,18 @@ impl Threefish512Ocbt {
         secure_zero(&mut tmp);
         secure_zero(&mut cblk_u64_in);
         secure_zero(&mut pblk_u64_out);
+    }
+
+    pub fn seal(
+        &mut self,
+        ct_out: &mut [u8], // Ciphertext output.
+        tag_out: &mut [u8], // Authentication-Tag output.
+        key:     &[u64; NUM_KEY_WORDS], // Input encryption key.
+        nonce:   u64,  // UNIQUE 62-bit nonce for tweak differentiation.
+        ad:      &[u8], // Additional data to simultaneously authenticate.
+        pt:      &[u8]) // Input plaintext to encipher.
+    {
+        //TODO
     }
 
     pub fn seal(
