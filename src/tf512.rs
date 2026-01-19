@@ -1564,10 +1564,82 @@ impl Threefish512Ocbt {
     }
 
     pub fn decrypt(&mut self, pt_out: &mut [u8], ct: &[u8]) {
-        //TODO
-        // TODO: Implement Threefish512 decryption routines.
-        // TODO: full blocks   -> TODO(implement) decrypt_full_block
-        // TODO: final partial -> TODO(implement) decrypt_final_block
+        let mut tmp          = [0u64; NUM_BLOCK_WORDS];
+        let mut cblk_u64_in  = [0u64; NUM_BLOCK_WORDS];
+        let mut pblk_u64_out = [0u64; NUM_BLOCK_WORDS];
+
+        if pt_out.len() != ct.len() {
+            panic!("pt_out.len() != ct.len()!");
+        }
+
+        let len = ct.len();
+        // Finalize now if there's one block or less.
+        if len <= NUM_BLOCK_BYTES {
+            let (final_po, final_ci) = match len {
+                NUM_BLOCK_BYTES => {
+                    // Copy the ciphertext into the aligned input buffer.
+                    block_as_u8_mut!(cblk_u64_in).copy_from_slice(&ct[..NUM_BLOCK_BYTES]);
+                    // Pass the input and output buffers.
+                    (OcbtFinalBlockMut::Whole(&mut pblk_u64_out), OcbtFinalBlock::Whole(&cblk_u64_in))
+                },
+                _ => {
+                    let cblk_u8_in  = block_as_u8_mut!(cblk_u64_in);
+                    let pblk_u8_out = block_as_u8_mut!(pblk_u64_out);
+                    // Copy the ciphertext into the aligned input buffer.
+                    cblk_u8_in[..len].copy_from_slice(ct);
+                    // Pass the input and output buffers.
+                    (OcbtFinalBlockMut::Partial(&mut pblk_u8_out[..len]), OcbtFinalBlock::Partial(&cblk_u8_in[..len]))
+                },
+            };
+            // Decrypt the input buffer into the output buffer.
+            self.decrypt_final_block(final_po, &mut tmp, final_ci);
+            // Copy the requested number of bytes out into the plaintext buffer.
+            pt_out.copy_from_slice(&block_as_u8!(pblk_u64_out)[..len]);
+            // Cleanup.
+            secure_zero(&mut tmp);
+            secure_zero(&mut cblk_u64_in);
+            secure_zero(&mut pblk_u64_out);
+            return;
+        } // ~ if len <= NUM_BLOCK_BYTES
+
+        // Getting here implies there are at least two blocks.
+        // We're checking for strictly less than the length so we can handle the final block
+        // explicitly, lastly.
+        let mut i = 0usize;
+        while i + NUM_BLOCK_BYTES < len {
+            // Copy 64 bytes into the aligned input buffer.
+            block_as_u8_mut!(cblk_u64_in).copy_from_slice(&ct[i .. i + NUM_BLOCK_BYTES]);
+            // Decrypt the input buffer into the output buffer.
+            self.decrypt_full_block(&mut pblk_u64_out, &cblk_u64_in);
+            // Copy 64 bytes out of the aligned output buffer into @pt_out for the caller.
+            pt_out[i .. i + NUM_BLOCK_BYTES].copy_from_slice(block_as_u8!(pblk_u64_out));
+            // Increment the byte counter.
+            i += NUM_BLOCK_BYTES;
+        }
+
+        // We have reached the final block.
+        // Copy the ciphertext into the aligned input buffer.
+        let remain = len - i;
+        block_as_u8_mut!(cblk_u64_in)[..remain].copy_from_slice(&ct[i..]);
+        let (final_po, final_ci) = match remain {
+            NUM_BLOCK_BYTES => {
+                // Last block is whole. Pass the input and output u64 buffers.
+                (OcbtFinalBlockMut::Whole(&mut pblk_u64_out), OcbtFinalBlock::Whole(&cblk_u64_in))
+            },
+            _ => {
+                // Last block is partial. Pass the input and output u8 buffers.
+                (OcbtFinalBlockMut::Partial(&mut block_as_u8_mut!(pblk_u64_out)[..remain]),
+                 OcbtFinalBlock::Partial(&block_as_u8!(cblk_u64_in)[..remain]))
+            },
+        };
+        // Decrypt the input buffer into the output buffer.
+        self.decrypt_final_block(final_po, &mut tmp, final_ci);
+        // Copy the requested number of bytes out into the plaintext buffer.
+        pt_out[i .. i + remain].copy_from_slice(&block_as_u8!(pblk_u64_out)[..remain]);
+        // Cleanup.
+        secure_zero(&mut tmp);
+        secure_zero(&mut cblk_u64_in);
+        secure_zero(&mut pblk_u64_out);
     }
 
     pub fn seal(
