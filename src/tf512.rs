@@ -1423,11 +1423,10 @@ impl Threefish512Ocbt {
         self.block_counter += 1;
     }
 
-    fn finalize_tag(
-        &mut self,
-        tag_out: &mut [u8; OCBT_TAG_BYTES],
-        tmp:     &mut [u64; NUM_BLOCK_WORDS])
+    fn finalize_tag(&mut self, tag_out: &mut [u8; OCBT_TAG_BYTES])
     {
+        let mut tmp = [0u64; NUM_BLOCK_WORDS];
+
         // 1. Combine AD and DATA accumulators into a temporary block.
         for i in 0usize..NUM_BLOCK_WORDS {
             tmp[i] = self.ad_acc[i] ^ self.data_acc[i];
@@ -1437,10 +1436,13 @@ impl Threefish512Ocbt {
         self.set_tweak(OCBT_DOMAIN_TAG, self.block_counter);
 
         // 3. Encrypt the combined accumulator in place.
-        self.tf.encipher_1(tmp);
+        self.tf.encipher_1(&mut tmp);
 
         // 4. Export as bytes.
-        tag_out.copy_from_slice(block_as_u8!(tmp));
+        tag_out.copy_from_slice(block_as_u8!(&tmp));
+
+        // 5. Zero the temporary.
+        secure_zero(&mut tmp);
         
         // We don't bother bumping the counter since this function is terminal.
     }
@@ -1635,25 +1637,31 @@ impl Threefish512Ocbt {
     pub fn seal(
         &mut self,
         ct_out: &mut [u8], // Ciphertext output.
-        tag_out: &mut [u8], // Authentication-Tag output.
+        tag_out: &mut [u8; OCBT_TAG_BYTES], // Authentication-Tag output.
         key:     &[u64; NUM_KEY_WORDS], // Input encryption key.
         nonce:   u64,  // UNIQUE 62-bit nonce for tweak differentiation.
         ad:      &[u8], // Additional data to simultaneously authenticate.
         pt:      &[u8]) // Input plaintext to encipher.
     {
-        //TODO
-    }
-
-    pub fn seal(
-        &mut self,
-        ct_out: Option<&mut [u8]>,
-        tag_out: &mut [u8; OCBT_TAG_BYTES],
-        key:   &[u64; NUM_KEY_WORDS],
-        nonce: u64,
-        ad:    Option<&[u8]>,
-        pt:    Option<&[u8]>)
-    {
-        //TODO
+        // Size assertion.
+        if ct_out.len() != pt.len() {
+            panic!("ct_out.len() != pt.len()!");
+        }
+        // 1. Reset internal state (block counter, accumulators, load cipher key)
+        self.block_counter = 0u64; // Reset the block counter.
+        self.tf.set_key(key);      // Load the cipher key.
+        self.ad_acc.fill(0u64);    // Zero the AD accumulator.
+        self.data_acc.fill(0u64);  // Zero the DATA accumulator.
+        // 2. Absorb additional data.
+        if !ad.is_empty() {
+            self.absorb_ad(ad);
+        }
+        // 3. Encrypt the plaintext.
+        if !pt.is_empty() {
+            self.encrypt(ct_out, pt);
+        }
+        // 4. Finalize the authentication tag.
+        self.finalize_tag(tag_out);
     }
 
     pub fn open(
