@@ -45,17 +45,15 @@ pub const CONST_240: u64 = 0x1BD11BDAA9FC1A22u64.to_le();
 pub const NUM_CTR_IV_BYTES: usize = 32;
 pub const NUM_CTR_IV_WORDS: usize = 4;
 
-pub const OCBT_DOMAIN_AD:           u64 = 0b000u64; /// Currently processing AD.
-pub const OCBT_DOMAIN_AD_PARTIAL:   u64 = 0b001u64; /// Processing a final, partial AD block.
-pub const OCBT_DOMAIN_DATA:         u64 = 0b010u64; /// Currently processing DATA.
-pub const OCBT_DOMAIN_DATA_PARTIAL: u64 = 0b011u64; /// Processing a final, partial DATA block.
-pub const OCBT_DOMAIN_TAG:          u64 = 0b100u64; /// Creating the tag after finalizing a whole DATA block.
-pub const OCBT_DOMAIN_TAG_PARTIAL:  u64 = 0b101u64; /// Creating the tag after finalizing a partial DATA block.
+pub const OCBT_FLAG_AD: u64      = 0b0001u64;
+pub const OCBT_FLAG_DATA: u64    = 0b0010u64;
+pub const OCBT_FLAG_PARTIAL: u64 = 0b0100u64;
+pub const OCBT_FLAG_TAG: u64     = 0b1000u64;
+
+pub const OCBT_TOP_4_BITS: u64 = 0b1111u64 << 60;
 
 pub const OCBT_TAG_WORDS: usize = 8;
 pub const OCBT_TAG_BYTES: usize = 64;
-/// Partial block finalization in OCB-T requires enciphering an all zero block for an XOR-Pad.
-pub static OCBT_ZERO_BLOCK: [u64; NUM_BLOCK_WORDS]  = [0u64; NUM_BLOCK_WORDS];
 
 pub enum OcbtError {
     TagMismatch,
@@ -1193,7 +1191,7 @@ impl Threefish512CtrDynamic {
 
 #[repr(C)]
 pub struct Threefish512Ocbt {
-    /// 61-bit message nonce (Upper 3 bits unused).
+    /// 60-bit message nonce (Upper 4 bits unused).
     pub nonce: u64,
     /// AD/Payload block counter (used in the tweak).
     pub block_counter: u64,
@@ -1215,6 +1213,12 @@ enum OcbtFinalBlockMut<'a> {
     Partial(&'a mut [u8]),
 }
 
+impl Drop for Threefish512Ocbt {
+    fn drop(&mut self) {
+        self.sanitize();
+    }
+}
+
 impl Threefish512Ocbt {
     /// Create a new OCB-T instance. Keying material passed on each invocation, not on
     /// initialization.
@@ -1229,12 +1233,12 @@ impl Threefish512Ocbt {
     }
 
     #[inline]
-    fn set_tweak(&mut self, domain: u64) {
-        // domain: low 3 bits of tweak[0]
+    fn set_tweak(&mut self, flags: u64) {
+        // domain: low 4 bits of tweak[0]
         // nonce:  stored in self.nonce
         // counter: stored in tweak[1]
 
-        let t0 = (self.nonce << 3) | (domain & 0b111u64);
+        let t0 = (self.nonce << 4) | (flags & 0b1111u64);
         let t1 = self.block_counter;
 
         self.tf.tweak[0] = t0.to_le();
@@ -1250,7 +1254,7 @@ impl Threefish512Ocbt {
         block: &[u64; NUM_BLOCK_WORDS])
     {
         // 1. Set the tweak for enciphering additional data.
-        self.set_tweak(OCBT_DOMAIN_AD);
+        self.set_tweak(OCBT_FLAG_AD);
         // 2. Encipher it into the temporary buffer.
         self.tf.encipher_2(tmp, block);
         // 3. XOR the resulting ciphertext into the AD accumulator.
@@ -1265,7 +1269,7 @@ impl Threefish512Ocbt {
         partial: &[u8])
     {
         // 1. Set the tweak for enciphering a final, partial AD block.
-        self.set_tweak(OCBT_DOMAIN_AD_PARTIAL);
+        self.set_tweak(OCBT_FLAG_AD | OCBT_FLAG_PARTIAL);
         {
             let tmp_bytes = block_as_u8_mut!(tmp);
             // 2. Copy the partial bytes directly into @tmp_bytes.
@@ -1290,7 +1294,7 @@ impl Threefish512Ocbt {
         block_in: &[u64; NUM_BLOCK_WORDS])
     {
         // 1. Set the tweak for enciphering payload.
-        self.set_tweak(OCBT_DOMAIN_DATA);
+        self.set_tweak(OCBT_FLAG_DATA);
         // 2. Encrypt the plaintext block.
         self.tf.encipher_2(block_out, block_in);
         // 3. Update the data accumulator using the plaintext for authentication.
@@ -1307,20 +1311,21 @@ impl Threefish512Ocbt {
     {
         match (final_out, final_in) {
             (OcbtFinalBlockMut::Whole(out_ctext_blk), OcbtFinalBlock::Whole(in_ptext_blk)) => {
-                self.set_tweak(OCBT_DOMAIN_DATA);
+                self.set_tweak(OCBT_FLAG_DATA);
                 // 1. Encrypt the plaintext.
                 self.tf.encipher_2(out_ctext_blk, in_ptext_blk);
                 // 2. Update data accumulator with plaintext for authentication.
                 xor_8!(self.data_acc, in_ptext_blk);
             },
             (OcbtFinalBlockMut::Partial(out_ctext_bytes), OcbtFinalBlock::Partial(in_ptext_bytes)) => {
-                self.set_tweak(OCBT_DOMAIN_DATA_PARTIAL);
+                self.set_tweak(OCBT_FLAG_DATA | OCBT_FLAG_PARTIAL);
                 if out_ctext_bytes.len() != in_ptext_bytes.len() {
                     panic!("out_ctext_bytes.len() != in_ptext_bytes.len()!");
                 }
                 let len = in_ptext_bytes.len();
                 // 1. Derive an "XOR-Pad" by encrypting all zero.
-                self.tf.encipher_2(tmp, &OCBT_ZERO_BLOCK);
+                tmp.fill(0u64);
+                self.tf.encipher_1(tmp);
                 {
                     // 2. XOR the XOR-Pad with the plaintext bytes and write to @out_ctext_bytes.
                     let tmp_bytes = block_as_u8_mut!(tmp);
@@ -1348,7 +1353,7 @@ impl Threefish512Ocbt {
         ctext_block_in:  &[u64; NUM_BLOCK_WORDS])
     {
         // 1. Set the tweak for deciphering payload.
-        self.set_tweak(OCBT_DOMAIN_DATA);
+        self.set_tweak(OCBT_FLAG_DATA);
         // 2. Decrypt the ciphertext block.
         self.tf.decipher_2(ptext_block_out, ctext_block_in);
         // 3. Update the data accumulator using the plaintext for authentication.
@@ -1366,7 +1371,7 @@ impl Threefish512Ocbt {
         match (final_out, final_in) {
             // <---------------- Whole final block (no padding) -------------------->
             (OcbtFinalBlockMut::Whole(ptext_block_out), OcbtFinalBlock::Whole(ctext_block_in)) => {
-                self.set_tweak(OCBT_DOMAIN_DATA);
+                self.set_tweak(OCBT_FLAG_DATA);
                 // 1. Decrypt the ciphertext block.
                 self.tf.decipher_2(ptext_block_out, ctext_block_in);
                 // 2. Update the data accumulator using the plaintext for authentication.
@@ -1374,13 +1379,14 @@ impl Threefish512Ocbt {
             },
             // <---------------- Partial final block (with padding) ------------------>
             (OcbtFinalBlockMut::Partial(ptext_bytes_out), OcbtFinalBlock::Partial(ctext_bytes_in)) => {
-                self.set_tweak(OCBT_DOMAIN_DATA_PARTIAL);
+                self.set_tweak(OCBT_FLAG_DATA | OCBT_FLAG_PARTIAL);
                 if ptext_bytes_out.len() != ctext_bytes_in.len() {
                     panic!("ptext_bytes_out.len() != ctext_bytes_in.len()!")
                 }
                 let len = ptext_bytes_out.len();
                 // 1. Derive an "XOR-Pad" by encrypting all zero.
-                self.tf.encipher_2(tmp, &OCBT_ZERO_BLOCK);
+                tmp.fill(0u64);
+                self.tf.encipher_1(tmp);
                 // 2. XOR the XOR-Pad with the ciphertext bytes and write to @ptext_bytes_out.
                 {
                     let tmp_bytes = block_as_u8_mut!(tmp);
@@ -1403,18 +1409,13 @@ impl Threefish512Ocbt {
         self.block_counter += 1;
     }
 
-    fn finalize_tag(
+    pub fn finalize_tag(
         &mut self,
         tag_out: &mut [u8; OCBT_TAG_BYTES],
-        final_data_was_partial: bool)
+        flags: u64)
     {
-        // 1. Set the tweak for TAG or TAG_PARTIAL.
-        let domain = if final_data_was_partial {
-            OCBT_DOMAIN_TAG_PARTIAL
-        } else {
-            OCBT_DOMAIN_TAG
-        };
-        self.set_tweak(domain);
+        // 1. Set the tweak with the chosen flags.
+        self.set_tweak(OCBT_FLAG_TAG | flags);
         // 2. Encipher the DATA accumulator.
         self.tf.encipher_1(&mut self.data_acc);
         // 3. XOR the AD accumulator into the enciphered DATA accumulator.
@@ -1425,8 +1426,8 @@ impl Threefish512Ocbt {
 
     pub fn sanitize(&mut self) {
         self.tf = Threefish512Dynamic::default();
-        self.ad_acc.fill(0u64);
-        self.data_acc.fill(0u64);
+        secure_zero(&mut self.ad_acc);
+        secure_zero(&mut self.data_acc);
     }
 
     pub fn absorb_ad(&mut self, ad: &[u8]) {
@@ -1642,25 +1643,30 @@ impl Threefish512Ocbt {
             return Err(OcbtError::InvalidLength);
         }
         // 1. Reset internal state (nonce, block counter, accumulators, load cipher key)
-        self.nonce         = nonce; // Update the UNIQUE nonce.
+        self.nonce         = nonce & !OCBT_TOP_4_BITS; // Update the UNIQUE nonce.
         self.block_counter = 0u64; // Reset the block counter.
         self.tf.set_key(key);      // Load the cipher key.
         self.ad_acc.fill(0u64);    // Zero the AD accumulator.
         self.data_acc.fill(0u64);  // Zero the DATA accumulator.
 
+        let mut tag_flags = OCBT_FLAG_TAG;
+
         // 2. Absorb additional data.
         if !ad.is_empty() {
             self.absorb_ad(ad);
+            tag_flags |= OCBT_FLAG_AD;
         }
 
         // 3. Encrypt the plaintext.
-        let mut final_data_was_partial = false;
         if !pt.is_empty() {
-            final_data_was_partial = self.encrypt(ct_out, pt);
+            tag_flags |= OCBT_FLAG_DATA;
+            if self.encrypt(ct_out, pt) {
+                tag_flags |= OCBT_FLAG_PARTIAL;
+            }
         }
 
         // 4. Finalize the authentication tag.
-        self.finalize_tag(tag_out, final_data_was_partial);
+        self.finalize_tag(tag_out, tag_flags);
 
         // 5. Sanitize internal state.
         self.sanitize();
@@ -1692,26 +1698,31 @@ impl Threefish512Ocbt {
         }
 
         // 1. Reset internal state (nonce, block counter, accumulators, load cipher key)
-        self.nonce         = nonce;
+        self.nonce         = nonce & !OCBT_TOP_4_BITS;
         self.block_counter = 0u64; // Reset the block counter.
         self.tf.set_key(key); // Load the cipher key.
         self.ad_acc.fill(0u64); // Zero the AD accumulator.
         self.data_acc.fill(0u64); // Zero the DATA accumulator.
 
+        let mut tag_flags = OCBT_FLAG_TAG;
+
         // 2. Absorb AD
         if !ad.is_empty() {
             self.absorb_ad(ad);
+            tag_flags |= OCBT_FLAG_AD;
         }
 
-        let mut final_data_was_partial = false;
         // 3. Decrypt ciphertext into @pt_out.
         if !ct.is_empty() {
-            final_data_was_partial = self.decrypt(pt_out, ct);
+            tag_flags |= OCBT_FLAG_DATA;
+            if self.decrypt(pt_out, ct) {
+                tag_flags |= OCBT_FLAG_PARTIAL;
+            }
         }
 
         // 4. Recompute tag
         let mut computed_tag = [0u8; OCBT_TAG_BYTES];
-        self.finalize_tag(&mut computed_tag, final_data_was_partial);
+        self.finalize_tag(&mut computed_tag, tag_flags);
 
         // 5. Constant-time compare
         let is_equal: bool = Self::ct_eq(&computed_tag, tag);
@@ -1728,7 +1739,7 @@ impl Threefish512Ocbt {
         // Successful decryption.
         Ok(())
     }
-}
+} // ~ impl Threefish512Ocbt
 
 #[cfg(test)]
 mod ocbt_tests {
@@ -1793,7 +1804,9 @@ mod ocbt_tests {
         let mut ocbt2 = Threefish512Ocbt::new();
         let mut out: &mut[u8] = &mut[];
 
-        let res2 = ocbt2.open(out, &key, nonce, ad, ct, &mut tag);
+        let res2 = ocbt2.open(out, &key, nonce & !OCBT_TOP_4_BITS, ad, ct, &mut tag);
+        println!("normal nonce: {:x}", nonce);
+        println!("nonce mased: {:x}", nonce & !OCBT_TOP_4_BITS);
         handle(res2, Handle::OPEN);
     }
 
