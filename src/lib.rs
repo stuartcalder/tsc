@@ -28,6 +28,7 @@ pub mod rand;
 pub mod catena512;
 pub mod kdf;
 pub mod secure_buffer;
+pub mod wots;
 extern crate rssc;
 
 #[cfg(test)]
