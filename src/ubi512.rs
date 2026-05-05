@@ -128,7 +128,7 @@ impl Default for Ubi512 {
     }
 }
 
-const CONFIG_INIT: [u64; NUM_HASH_WORDS] = [
+pub static CONFIG_INIT: [u64; NUM_HASH_WORDS] = [
     0x5348413301000000u64.to_be(), 0u64, 0u64, 0u64,
     0u64                         , 0u64, 0u64, 0u64
 ];
@@ -144,7 +144,8 @@ impl Ubi512
     {
         initialize_tweak!(self, TWEAK_LAST_BIT | TYPEMASK_CFG);
         *get_tweak_position_mut!(self) = 32u64.to_le();
-        self.msg = CONFIG_INIT.clone();
+        //self.msg = CONFIG_INIT.clone();
+        self.msg.copy_from_slice(&CONFIG_INIT);
         self.msg[1] = num_output_bits.to_le();
         parity_encipher_xor!(self);
     }

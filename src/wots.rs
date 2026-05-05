@@ -68,7 +68,7 @@ pub fn sk_from_seed(skein: &mut Skein512, out_sk: &mut SecretKey, seed: &Block, 
         buf.extend_from_slice(seed);
         buf.extend_from_slice(&(i as u16).to_be_bytes());
 
-        skein.hash(&mut tmp, &buf);
+        skein.hash_native(&mut tmp, &buf);
         out_sk[i] = tmp;
     }
 
@@ -144,7 +144,7 @@ pub fn verify(
     // pk is public; normal equality is fine. If you want CT compare, swap this out.
     let ok = &derived == expected_pk;
 
-    secure_zero(derived.as_mut_slice().concat().as_mut_slice()); // best-effort wipe; see note below
+    secure_zero_blocks(&mut derived);
     ok
 }
 
@@ -224,6 +224,14 @@ fn message_to_steps(skein: &mut Skein512, out_steps: &mut Steps, msg: &[u8], ctx
     secure_zero(buf.as_mut_slice());
 }
 
+#[inline]
+fn secure_zero_blocks(blocks: &mut [Block; N]) {
+    let p = blocks.as_mut_ptr() as *mut u8;
+    const NBYTES: usize = N * LEN;
+    let bytes = unsafe { std::slice::from_raw_parts_mut(p, NBYTES) };
+    secure_zero(bytes);
+}
+
 // ----------------------------- Tests -----------------------------
 
 #[cfg(test)]
@@ -252,9 +260,9 @@ mod tests {
         assert!(!verify(&mut skein, &pk, &sig, b"tampered", ctx));
 
         // Wipe test buffers (optional)
-        secure_zero(sk.as_mut_slice().concat().as_mut_slice());
-        secure_zero(sig.as_mut_slice().concat().as_mut_slice());
-        secure_zero(pk.as_mut_slice().concat().as_mut_slice());
+        secure_zero_blocks(&mut sk);
+        secure_zero_blocks(&mut sig);
+        secure_zero_blocks(&mut pk);
     }
 }
 

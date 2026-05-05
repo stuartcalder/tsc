@@ -27,7 +27,7 @@ pub struct Skein512 {
     pub ubi512: Ubi512
 }
 
-pub const NATIVE_INIT: [u64; 8] = [
+pub static NATIVE_INIT: [u64; 8] = [
     0xCE519C74FFAD0349u64.to_be(),
     0x03DF469739DE950Du64.to_be(),
     0xCE9BC7274193D18Fu64.to_be(),
@@ -38,7 +38,7 @@ pub const NATIVE_INIT: [u64; 8] = [
     0x33CC0F660BA418AEu64.to_be(),
 ];
 
-pub const OUTPUT_16_WORDS_INIT: [u64; 8] = [
+pub static OUTPUT_16_WORDS_INIT: [u64; 8] = [
     0x545E7A4C7832AFDBu64.to_be(),
     0xC7AB18D287D9E62Du64.to_be(),
     0x4108903ACBA9A3AEu64.to_be(),
