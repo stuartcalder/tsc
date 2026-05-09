@@ -45,17 +45,17 @@ pub const CONST_240: u64 = 0x1BD11BDAA9FC1A22u64.to_le();
 pub const NUM_CTR_IV_BYTES: usize = 32;
 pub const NUM_CTR_IV_WORDS: usize = 4;
 
-pub const OCBT_FLAG_AD: u64      = 0b0001u64;
-pub const OCBT_FLAG_DATA: u64    = 0b0010u64;
-pub const OCBT_FLAG_PARTIAL: u64 = 0b0100u64;
-pub const OCBT_FLAG_TAG: u64     = 0b1000u64;
+pub const OCB_FLAG_AD: u64      = 0b0001u64;
+pub const OCB_FLAG_DATA: u64    = 0b0010u64;
+pub const OCB_FLAG_PARTIAL: u64 = 0b0100u64;
+pub const OCB_FLAG_TAG: u64     = 0b1000u64;
 
-pub const OCBT_TOP_4_BITS: u64 = 0b1111u64 << 60;
+pub const OCB_TOP_4_BITS: u64 = 0b1111u64 << 60;
 
-pub const OCBT_TAG_WORDS: usize = 8;
-pub const OCBT_TAG_BYTES: usize = 64;
+pub const OCB_TAG_WORDS: usize = 8;
+pub const OCB_TAG_BYTES: usize = 64;
 
-pub enum OcbtError {
+pub enum OcbError {
     TagMismatch,
     InvalidLength
 }
@@ -1190,7 +1190,7 @@ impl Threefish512CtrDynamic {
 }
 
 #[repr(C)]
-pub struct Threefish512Ocbt {
+pub struct Threefish512Ocb {
     /// 60-bit message nonce (Upper 4 bits unused).
     pub nonce: u64,
     /// AD/Payload block counter (used in the tweak).
@@ -1203,23 +1203,23 @@ pub struct Threefish512Ocbt {
     pub data_acc: [u64; NUM_BLOCK_WORDS],
 }
 
-enum OcbtFinalBlock<'a> {
+enum OcbFinalBlock<'a> {
     Whole(&'a   [u64; NUM_BLOCK_WORDS]),
     Partial(&'a [u8]),
 }
 
-enum OcbtFinalBlockMut<'a> {
+enum OcbFinalBlockMut<'a> {
     Whole(&'a   mut [u64; NUM_BLOCK_WORDS]),
     Partial(&'a mut [u8]),
 }
 
-impl Drop for Threefish512Ocbt {
+impl Drop for Threefish512Ocb {
     fn drop(&mut self) {
         self.sanitize();
     }
 }
 
-impl Threefish512Ocbt {
+impl Threefish512Ocb {
     /// Create a new OCB-T instance. Keying material passed on each invocation, not on
     /// initialization.
     pub fn new() -> Self {
@@ -1254,7 +1254,7 @@ impl Threefish512Ocbt {
         block: &[u64; NUM_BLOCK_WORDS])
     {
         // 1. Set the tweak for enciphering additional data.
-        self.set_tweak(OCBT_FLAG_AD);
+        self.set_tweak(OCB_FLAG_AD);
         // 2. Encipher it into the temporary buffer.
         self.tf.encipher_2(tmp, block);
         // 3. XOR the resulting ciphertext into the AD accumulator.
@@ -1269,7 +1269,7 @@ impl Threefish512Ocbt {
         partial: &[u8])
     {
         // 1. Set the tweak for enciphering a final, partial AD block.
-        self.set_tweak(OCBT_FLAG_AD | OCBT_FLAG_PARTIAL);
+        self.set_tweak(OCB_FLAG_AD | OCB_FLAG_PARTIAL);
         {
             let tmp_bytes = block_as_u8_mut!(tmp);
             // 2. Copy the partial bytes directly into @tmp_bytes.
@@ -1294,7 +1294,7 @@ impl Threefish512Ocbt {
         block_in: &[u64; NUM_BLOCK_WORDS])
     {
         // 1. Set the tweak for enciphering payload.
-        self.set_tweak(OCBT_FLAG_DATA);
+        self.set_tweak(OCB_FLAG_DATA);
         // 2. Encrypt the plaintext block.
         self.tf.encipher_2(block_out, block_in);
         // 3. Update the data accumulator using the plaintext for authentication.
@@ -1305,20 +1305,20 @@ impl Threefish512Ocbt {
 
     fn encrypt_final_block(
         &mut self,
-        final_out: OcbtFinalBlockMut,
+        final_out: OcbFinalBlockMut,
         tmp:       &mut [u64; NUM_BLOCK_WORDS],
-        final_in:  OcbtFinalBlock)
+        final_in:  OcbFinalBlock)
     {
         match (final_out, final_in) {
-            (OcbtFinalBlockMut::Whole(out_ctext_blk), OcbtFinalBlock::Whole(in_ptext_blk)) => {
-                self.set_tweak(OCBT_FLAG_DATA);
+            (OcbFinalBlockMut::Whole(out_ctext_blk), OcbFinalBlock::Whole(in_ptext_blk)) => {
+                self.set_tweak(OCB_FLAG_DATA);
                 // 1. Encrypt the plaintext.
                 self.tf.encipher_2(out_ctext_blk, in_ptext_blk);
                 // 2. Update data accumulator with plaintext for authentication.
                 xor_8!(self.data_acc, in_ptext_blk);
             },
-            (OcbtFinalBlockMut::Partial(out_ctext_bytes), OcbtFinalBlock::Partial(in_ptext_bytes)) => {
-                self.set_tweak(OCBT_FLAG_DATA | OCBT_FLAG_PARTIAL);
+            (OcbFinalBlockMut::Partial(out_ctext_bytes), OcbFinalBlock::Partial(in_ptext_bytes)) => {
+                self.set_tweak(OCB_FLAG_DATA | OCB_FLAG_PARTIAL);
                 if out_ctext_bytes.len() != in_ptext_bytes.len() {
                     panic!("out_ctext_bytes.len() != in_ptext_bytes.len()!");
                 }
@@ -1340,7 +1340,7 @@ impl Threefish512Ocbt {
                 }
             },
             _ => {
-                panic!("OcbtFinalBlockMut/OcbtFinalBlock Mismatch!");
+                panic!("OcbFinalBlockMut/OcbFinalBlock Mismatch!");
             },
         }
         // Increment the unified block counter.
@@ -1353,7 +1353,7 @@ impl Threefish512Ocbt {
         ctext_block_in:  &[u64; NUM_BLOCK_WORDS])
     {
         // 1. Set the tweak for deciphering payload.
-        self.set_tweak(OCBT_FLAG_DATA);
+        self.set_tweak(OCB_FLAG_DATA);
         // 2. Decrypt the ciphertext block.
         self.tf.decipher_2(ptext_block_out, ctext_block_in);
         // 3. Update the data accumulator using the plaintext for authentication.
@@ -1364,22 +1364,22 @@ impl Threefish512Ocbt {
 
     fn decrypt_final_block(
         &mut self,
-        final_out: OcbtFinalBlockMut,
+        final_out: OcbFinalBlockMut,
         tmp:       &mut [u64; NUM_BLOCK_WORDS],
-        final_in:  OcbtFinalBlock)
+        final_in:  OcbFinalBlock)
     {
         match (final_out, final_in) {
             // <---------------- Whole final block (no padding) -------------------->
-            (OcbtFinalBlockMut::Whole(ptext_block_out), OcbtFinalBlock::Whole(ctext_block_in)) => {
-                self.set_tweak(OCBT_FLAG_DATA);
+            (OcbFinalBlockMut::Whole(ptext_block_out), OcbFinalBlock::Whole(ctext_block_in)) => {
+                self.set_tweak(OCB_FLAG_DATA);
                 // 1. Decrypt the ciphertext block.
                 self.tf.decipher_2(ptext_block_out, ctext_block_in);
                 // 2. Update the data accumulator using the plaintext for authentication.
                 xor_8!(self.data_acc, ptext_block_out);
             },
             // <---------------- Partial final block (with padding) ------------------>
-            (OcbtFinalBlockMut::Partial(ptext_bytes_out), OcbtFinalBlock::Partial(ctext_bytes_in)) => {
-                self.set_tweak(OCBT_FLAG_DATA | OCBT_FLAG_PARTIAL);
+            (OcbFinalBlockMut::Partial(ptext_bytes_out), OcbFinalBlock::Partial(ctext_bytes_in)) => {
+                self.set_tweak(OCB_FLAG_DATA | OCB_FLAG_PARTIAL);
                 if ptext_bytes_out.len() != ctext_bytes_in.len() {
                     panic!("ptext_bytes_out.len() != ctext_bytes_in.len()!")
                 }
@@ -1402,7 +1402,7 @@ impl Threefish512Ocbt {
                 xor_8!(self.data_acc, tmp);
             },
             _ => {
-                panic!("OcbtFinalBlockMut/OcbtFinalBlock Mismatch!");
+                panic!("OcbFinalBlockMut/OcbFinalBlock Mismatch!");
             },
         }
         // Increment the unified block counter.
@@ -1411,11 +1411,11 @@ impl Threefish512Ocbt {
 
     pub fn finalize_tag(
         &mut self,
-        tag_out: &mut [u8; OCBT_TAG_BYTES],
+        tag_out: &mut [u8; OCB_TAG_BYTES],
         flags: u64)
     {
         // 1. Set the tweak with the chosen flags.
-        self.set_tweak(OCBT_FLAG_TAG | flags);
+        self.set_tweak(OCB_FLAG_TAG | flags);
         // 2. Encipher the DATA accumulator.
         self.tf.encipher_1(&mut self.data_acc);
         // 3. XOR the AD accumulator into the enciphered DATA accumulator.
@@ -1474,8 +1474,8 @@ impl Threefish512Ocbt {
                     // Copy the plaintext into the aligned input buffer.
                     block_as_u8_mut!(block_u64_in).copy_from_slice(&pt[..NUM_BLOCK_BYTES]);
                     // Pass the input and output buffers.
-                    (OcbtFinalBlockMut::Whole(&mut block_u64_out),
-                     OcbtFinalBlock::Whole(&block_u64_in))
+                    (OcbFinalBlockMut::Whole(&mut block_u64_out),
+                     OcbFinalBlock::Whole(&block_u64_in))
                 },
                 _ => {
                     let block_u8_in  = block_as_u8_mut!(block_u64_in);
@@ -1483,8 +1483,8 @@ impl Threefish512Ocbt {
                     // Copy the plaintext into the aligned input buffer.
                     block_u8_in[..len].copy_from_slice(pt);
                     // Pass the input and output buffers.
-                    (OcbtFinalBlockMut::Partial(&mut block_u8_out[..len]),
-                     OcbtFinalBlock::Partial(&block_u8_in[..len]))
+                    (OcbFinalBlockMut::Partial(&mut block_u8_out[..len]),
+                     OcbFinalBlock::Partial(&block_u8_in[..len]))
                 },
             };
             // Encrypt the input buffer into the output buffer.
@@ -1521,14 +1521,14 @@ impl Threefish512Ocbt {
             NUM_BLOCK_BYTES => {
                 final_was_partial = false;
                 // Last block is whole. Pass the input and output u64 buffers.
-                (OcbtFinalBlockMut::Whole(&mut block_u64_out), OcbtFinalBlock::Whole(&block_u64_in))
+                (OcbFinalBlockMut::Whole(&mut block_u64_out), OcbFinalBlock::Whole(&block_u64_in))
             },
             _ => {
                 // last black is partial. Pass the input and output u8 buffers.
-                (OcbtFinalBlockMut::Partial(
+                (OcbFinalBlockMut::Partial(
                     &mut block_as_u8_mut!(block_u64_out)[..remain]
                 ),
-                OcbtFinalBlock::Partial(
+                OcbFinalBlock::Partial(
                     &block_as_u8!(block_u64_in)[..remain]
                 ))
             },
@@ -1565,7 +1565,7 @@ impl Threefish512Ocbt {
                     // Copy the ciphertext into the aligned input buffer.
                     block_as_u8_mut!(cblk_u64_in).copy_from_slice(&ct[..NUM_BLOCK_BYTES]);
                     // Pass the input and output buffers.
-                    (OcbtFinalBlockMut::Whole(&mut pblk_u64_out), OcbtFinalBlock::Whole(&cblk_u64_in))
+                    (OcbFinalBlockMut::Whole(&mut pblk_u64_out), OcbFinalBlock::Whole(&cblk_u64_in))
                 },
                 _ => {
                     let cblk_u8_in  = block_as_u8_mut!(cblk_u64_in);
@@ -1573,7 +1573,7 @@ impl Threefish512Ocbt {
                     // Copy the ciphertext into the aligned input buffer.
                     cblk_u8_in[..len].copy_from_slice(ct);
                     // Pass the input and output buffers.
-                    (OcbtFinalBlockMut::Partial(&mut pblk_u8_out[..len]), OcbtFinalBlock::Partial(&cblk_u8_in[..len]))
+                    (OcbFinalBlockMut::Partial(&mut pblk_u8_out[..len]), OcbFinalBlock::Partial(&cblk_u8_in[..len]))
                 },
             };
             // Decrypt the input buffer into the output buffer.
@@ -1610,12 +1610,12 @@ impl Threefish512Ocbt {
             NUM_BLOCK_BYTES => {
                 final_was_partial = false;
                 // Last block is whole. Pass the input and output u64 buffers.
-                (OcbtFinalBlockMut::Whole(&mut pblk_u64_out), OcbtFinalBlock::Whole(&cblk_u64_in))
+                (OcbFinalBlockMut::Whole(&mut pblk_u64_out), OcbFinalBlock::Whole(&cblk_u64_in))
             },
             _ => {
                 // Last block is partial. Pass the input and output u8 buffers.
-                (OcbtFinalBlockMut::Partial(&mut block_as_u8_mut!(pblk_u64_out)[..remain]),
-                 OcbtFinalBlock::Partial(&block_as_u8!(cblk_u64_in)[..remain]))
+                (OcbFinalBlockMut::Partial(&mut block_as_u8_mut!(pblk_u64_out)[..remain]),
+                 OcbFinalBlock::Partial(&block_as_u8!(cblk_u64_in)[..remain]))
             },
         };
         // Decrypt the input buffer into the output buffer.
@@ -1632,36 +1632,36 @@ impl Threefish512Ocbt {
     pub fn seal(
         &mut self,
         ct_out: &mut [u8], // Ciphertext output.
-        tag_out: &mut [u8; OCBT_TAG_BYTES], // Authentication-Tag output.
+        tag_out: &mut [u8; OCB_TAG_BYTES], // Authentication-Tag output.
         key:     &[u64; NUM_KEY_WORDS], // Input encryption key.
         nonce:   u64,  // UNIQUE 62-bit nonce for tweak differentiation.
         ad:      &[u8], // Additional data to simultaneously authenticate.
         pt:      &[u8], // Input plaintext to encipher.
-    ) -> Result<(), OcbtError> {
+    ) -> Result<(), OcbError> {
         // Size check.
         if ct_out.len() != pt.len() {
-            return Err(OcbtError::InvalidLength);
+            return Err(OcbError::InvalidLength);
         }
         // 1. Reset internal state (nonce, block counter, accumulators, load cipher key)
-        self.nonce         = nonce & !OCBT_TOP_4_BITS; // Update the UNIQUE nonce.
+        self.nonce         = nonce & !OCB_TOP_4_BITS; // Update the UNIQUE nonce.
         self.block_counter = 0u64; // Reset the block counter.
         self.tf.set_key(key);      // Load the cipher key.
         self.ad_acc.fill(0u64);    // Zero the AD accumulator.
         self.data_acc.fill(0u64);  // Zero the DATA accumulator.
 
-        let mut tag_flags = OCBT_FLAG_TAG;
+        let mut tag_flags = OCB_FLAG_TAG;
 
         // 2. Absorb additional data.
         if !ad.is_empty() {
             self.absorb_ad(ad);
-            tag_flags |= OCBT_FLAG_AD;
+            tag_flags |= OCB_FLAG_AD;
         }
 
         // 3. Encrypt the plaintext.
         if !pt.is_empty() {
-            tag_flags |= OCBT_FLAG_DATA;
+            tag_flags |= OCB_FLAG_DATA;
             if self.encrypt(ct_out, pt) {
-                tag_flags |= OCBT_FLAG_PARTIAL;
+                tag_flags |= OCB_FLAG_PARTIAL;
             }
         }
 
@@ -1690,38 +1690,38 @@ impl Threefish512Ocbt {
         nonce: u64,
         ad: &[u8],
         ct: &[u8],
-        tag: &[u8; OCBT_TAG_BYTES],
-    ) -> Result<(), OcbtError> {
+        tag: &[u8; OCB_TAG_BYTES],
+    ) -> Result<(), OcbError> {
         // Size check.
         if pt_out.len() != ct.len() {
-            return Err(OcbtError::InvalidLength);
+            return Err(OcbError::InvalidLength);
         }
 
         // 1. Reset internal state (nonce, block counter, accumulators, load cipher key)
-        self.nonce         = nonce & !OCBT_TOP_4_BITS;
+        self.nonce         = nonce & !OCB_TOP_4_BITS;
         self.block_counter = 0u64; // Reset the block counter.
         self.tf.set_key(key); // Load the cipher key.
         self.ad_acc.fill(0u64); // Zero the AD accumulator.
         self.data_acc.fill(0u64); // Zero the DATA accumulator.
 
-        let mut tag_flags = OCBT_FLAG_TAG;
+        let mut tag_flags = OCB_FLAG_TAG;
 
         // 2. Absorb AD
         if !ad.is_empty() {
             self.absorb_ad(ad);
-            tag_flags |= OCBT_FLAG_AD;
+            tag_flags |= OCB_FLAG_AD;
         }
 
         // 3. Decrypt ciphertext into @pt_out.
         if !ct.is_empty() {
-            tag_flags |= OCBT_FLAG_DATA;
+            tag_flags |= OCB_FLAG_DATA;
             if self.decrypt(pt_out, ct) {
-                tag_flags |= OCBT_FLAG_PARTIAL;
+                tag_flags |= OCB_FLAG_PARTIAL;
             }
         }
 
         // 4. Recompute tag
-        let mut computed_tag = [0u8; OCBT_TAG_BYTES];
+        let mut computed_tag = [0u8; OCB_TAG_BYTES];
         self.finalize_tag(&mut computed_tag, tag_flags);
 
         // 5. Constant-time compare
@@ -1733,16 +1733,16 @@ impl Threefish512Ocbt {
 
         // 7. Verify that the tags match.
         if !is_equal {
-            return Err(OcbtError::TagMismatch);
+            return Err(OcbError::TagMismatch);
         }
 
         // Successful decryption.
         Ok(())
     }
-} // ~ impl Threefish512Ocbt
+} // ~ impl Threefish512Ocb
 
 #[cfg(test)]
-mod ocbt_tests {
+mod ocb_tests {
     use super::*;
 
     // Helper: Generate deterministic pseudo-random bytes.
@@ -1761,27 +1761,27 @@ mod ocbt_tests {
         OPEN
     }
 
-    fn handle(res: Result<(), OcbtError>, hnd: Handle) {
+    fn handle(res: Result<(), OcbError>, hnd: Handle) {
         match hnd {
             Handle::SEAL => {
                 match res {
                     Ok(_) => {},
-                    Err(OcbtError::InvalidLength) => {
-                        panic!("ocbt.seal() failed with InvalidLength!");
+                    Err(OcbError::InvalidLength) => {
+                        panic!("ocb.seal() failed with InvalidLength!");
                     },
-                    Err(OcbtError::TagMismatch) => {
-                        panic!("ocbt.seal() failed with a TagMismatch error! It's not even supposed to be capable of returning that!");
+                    Err(OcbError::TagMismatch) => {
+                        panic!("ocb.seal() failed with a TagMismatch error! It's not even supposed to be capable of returning that!");
                     },
                 }
             },
             Handle::OPEN => {
                 match res {
                     Ok(_) => {},
-                    Err(OcbtError::InvalidLength) => {
-                        panic!("ocbt.open() failed with InvalidLength!");
+                    Err(OcbError::InvalidLength) => {
+                        panic!("ocb.open() failed with InvalidLength!");
                     },
-                    Err(OcbtError::TagMismatch) => {
-                        panic!("ocbt.open() failed with a TagMismatch error!");
+                    Err(OcbError::TagMismatch) => {
+                        panic!("ocb.open() failed with a TagMismatch error!");
                     },
                 }
             },
@@ -1791,43 +1791,43 @@ mod ocbt_tests {
     // 1. Empty AD + Empty PT.
     #[test]
     fn test_empty_ad_empty_pt() {
-        let mut ocbt  = Threefish512Ocbt::new();
+        let mut ocb  = Threefish512Ocb::new();
         let key       = [0u64; NUM_KEY_WORDS];
         let nonce     = 0x1111_2222_3333_4444u64;
         let ad: &[u8] = &[];
         let pt: &[u8] = &[];
         let mut ct: &mut [u8] = &mut [];
-        let mut tag = [0u8; OCBT_TAG_BYTES];
+        let mut tag = [0u8; OCB_TAG_BYTES];
 
-        let res = ocbt.seal(ct, &mut tag, &key, nonce, ad, pt);
+        let res = ocb.seal(ct, &mut tag, &key, nonce, ad, pt);
         handle(res, Handle::SEAL);
-        let mut ocbt2 = Threefish512Ocbt::new();
+        let mut ocb2 = Threefish512Ocb::new();
         let mut out: &mut[u8] = &mut[];
 
-        let res2 = ocbt2.open(out, &key, nonce & !OCBT_TOP_4_BITS, ad, ct, &mut tag);
+        let res2 = ocb2.open(out, &key, nonce & !OCB_TOP_4_BITS, ad, ct, &mut tag);
         println!("normal nonce: {:x}", nonce);
-        println!("nonce mased: {:x}", nonce & !OCBT_TOP_4_BITS);
+        println!("nonce mased: {:x}", nonce & !OCB_TOP_4_BITS);
         handle(res2, Handle::OPEN);
     }
 
     // 2. Empty AD + non-empty PT.
     #[test]
     fn empty_ad_nonempty_pt() {
-        let mut ocbt = Threefish512Ocbt::new();
+        let mut ocb = Threefish512Ocb::new();
         let key      = [1u64; NUM_KEY_WORDS];
         let nonce    = 0xABCD_EF01_2345_6789u64;
 
         let ad = &[];
         let pt = b"Hello world!";
         let mut ct  = vec![0u8; pt.len()];
-        let mut tag = [0u8; OCBT_TAG_BYTES];
+        let mut tag = [0u8; OCB_TAG_BYTES];
 
-        let res = ocbt.seal(&mut ct, &mut tag, &key, nonce, ad, pt);
+        let res = ocb.seal(&mut ct, &mut tag, &key, nonce, ad, pt);
         handle(res, Handle::SEAL);
 
-        let mut ocbt2 = Threefish512Ocbt::new();
+        let mut ocb2 = Threefish512Ocb::new();
         let mut out   = vec![0u8; pt.len()];
-        let res2      = ocbt2.open(&mut out, &key, nonce, ad, &ct, &tag);
+        let res2      = ocb2.open(&mut out, &key, nonce, ad, &ct, &tag);
         handle(res2, Handle::OPEN);
 
         assert_eq!(out, pt);
@@ -1836,29 +1836,29 @@ mod ocbt_tests {
     // 3. Non-empty AD + empty PT.
     #[test]
     fn nonempty_ad_empty_pt() {
-        let mut ocbt = Threefish512Ocbt::new();
+        let mut ocb = Threefish512Ocb::new();
         let key   = [2u64; NUM_KEY_WORDS];
         let nonce = 0xDEAD_BEEF_DEAD_BEEF;
 
         let ad = b"metadata";
         let pt = &[];
         let mut ct = [];
-        let mut tag = [0u8; OCBT_TAG_BYTES];
+        let mut tag = [0u8; OCB_TAG_BYTES];
 
-        let res = ocbt.seal(&mut ct, &mut tag, &key, nonce, ad, pt);
+        let res = ocb.seal(&mut ct, &mut tag, &key, nonce, ad, pt);
         handle(res, Handle::SEAL);
 
-        let mut ocbt2 = Threefish512Ocbt::new();
+        let mut ocb2 = Threefish512Ocb::new();
         let mut out = [];
         
-        let res2 = ocbt2.open(&mut out, &key, nonce, ad, &ct, &tag);
+        let res2 = ocb2.open(&mut out, &key, nonce, ad, &ct, &tag);
         handle(res2, Handle::OPEN);
     }
 
     // 4. Multi-block plaintext.
     #[test]
     fn multiblock_pt() {
-        let mut ocbt = Threefish512Ocbt::new();
+        let mut ocb = Threefish512Ocb::new();
         let key     = [3u64; NUM_KEY_WORDS];
         let nonce   = 0xCAFEBABECAFEBABE;
 
@@ -1867,14 +1867,14 @@ mod ocbt_tests {
 
         let ad = b"header";
         let mut ct = vec![0u8; pt.len()];
-        let mut tag = [0u8; OCBT_TAG_BYTES];
+        let mut tag = [0u8; OCB_TAG_BYTES];
 
-        let res = ocbt.seal(&mut ct, &mut tag, &key, nonce, ad, &pt);
+        let res = ocb.seal(&mut ct, &mut tag, &key, nonce, ad, &pt);
         handle(res, Handle::SEAL);
 
-        let mut ocbt2 = Threefish512Ocbt::new();
+        let mut ocb2 = Threefish512Ocb::new();
         let mut out   = vec![0u8; pt.len()];
-        let res2 = ocbt2.open(&mut out, &key, nonce, ad, &ct, &tag);
+        let res2 = ocb2.open(&mut out, &key, nonce, ad, &ct, &tag);
         handle(res2, Handle::OPEN);
 
         assert_eq!(out, pt);
@@ -1883,56 +1883,56 @@ mod ocbt_tests {
     // 5. Payload tampering detection.
     #[test]
     fn payload_tamper_detection() {
-        let mut ocbt = Threefish512Ocbt::new();
+        let mut ocb = Threefish512Ocb::new();
         let key = [4u64; NUM_KEY_WORDS];
         let nonce = 0x9999_8888_7777_6666u64;
 
         let pt = b"Attack at dawn";
         let ad = b"orders";
         let mut ct = vec![0u8; pt.len()];
-        let mut tag = [0u8; OCBT_TAG_BYTES];
+        let mut tag = [0u8; OCB_TAG_BYTES];
 
-        let res = ocbt.seal(&mut ct, &mut tag, &key, nonce, ad, pt);
+        let res = ocb.seal(&mut ct, &mut tag, &key, nonce, ad, pt);
         handle(res, Handle::SEAL);
 
         ct[0] ^= 0xFFu8;
 
-        let mut ocbt2 = Threefish512Ocbt::new();
+        let mut ocb2 = Threefish512Ocb::new();
         let mut out   = vec![0u8; pt.len()];
-        let res2      = ocbt2.open(&mut out, &key, nonce, ad, &ct, &tag);
+        let res2      = ocb2.open(&mut out, &key, nonce, ad, &ct, &tag);
 
-        assert!(matches!(res2, Err(OcbtError::TagMismatch)));
+        assert!(matches!(res2, Err(OcbError::TagMismatch)));
     }
 
     // 6. AD tampering detection.
     #[test]
     fn ad_tamper_detection() {
-        let mut ocbt = Threefish512Ocbt::new();
+        let mut ocb = Threefish512Ocb::new();
         let key = [5u64; NUM_KEY_WORDS];
         let nonce = 0x5555_4444_3333_2222u64;
 
         let pt = b"Attack at dawn";
         let mut ad = Vec::<u8>::from(b"orders");
         let mut ct = vec![0u8; pt.len()];
-        let mut tag = [0u8; OCBT_TAG_BYTES];
+        let mut tag = [0u8; OCB_TAG_BYTES];
 
-        let res = ocbt.seal(&mut ct, &mut tag, &key, nonce, &ad, pt);
+        let res = ocb.seal(&mut ct, &mut tag, &key, nonce, &ad, pt);
         handle(res, Handle::SEAL);
 
         ad[5] = b'z'; // "orderz"
 
-        let mut ocbt2 = Threefish512Ocbt::new();
+        let mut ocb2 = Threefish512Ocb::new();
         let mut out   = vec![0u8; pt.len()];
-        let res2      = ocbt2.open(&mut out, &key, nonce, &ad, &ct, &tag);
+        let res2      = ocb2.open(&mut out, &key, nonce, &ad, &ct, &tag);
 
-        assert!(matches!(res2, Err(OcbtError::TagMismatch)));
+        assert!(matches!(res2, Err(OcbError::TagMismatch)));
     }
 
     // 7. Randomized round-trip fuzzing.
     #[test]
     fn fuzz_roundtrip() {
-        let mut ocbt_0 = Threefish512Ocbt::new();
-        let mut ocbt_1 = Threefish512Ocbt::new();
+        let mut ocb_0 = Threefish512Ocb::new();
+        let mut ocb_1 = Threefish512Ocb::new();
 
         let mut key = [0u64; NUM_KEY_WORDS];
         fill_rand(block_as_u8_mut!(&mut key), 777);
@@ -1947,13 +1947,13 @@ mod ocbt_tests {
             fill_rand(&mut ad, (i * 999) as u64);
 
             let mut ct  = vec![0u8; pt.len()];
-            let mut tag = [0u8; OCBT_TAG_BYTES];
+            let mut tag = [0u8; OCB_TAG_BYTES];
 
-            let res_0 = ocbt_0.seal(&mut ct, &mut tag, &key, nonce, &ad, &pt);
+            let res_0 = ocb_0.seal(&mut ct, &mut tag, &key, nonce, &ad, &pt);
             handle(res_0, Handle::SEAL);
 
             let mut out = vec![0u8; pt.len()];
-            let res_1 = ocbt_1.open(&mut out, &key, nonce, &ad, &ct, &tag);
+            let res_1 = ocb_1.open(&mut out, &key, nonce, &ad, &ct, &tag);
             handle(res_1, Handle::OPEN);
 
             assert_eq!(out, pt);
