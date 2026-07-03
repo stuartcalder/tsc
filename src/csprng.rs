@@ -120,6 +120,7 @@ impl Csprng {
         if max == 0u64 {
             return 0u64
         }
+        let max = max + 1
         // r = 2^64 % max, computed without 128-bit math.
         // In unsigned arithmetic, 0u64.wrapping_sub(max) == 2^64 - max.
         // Then (2^64 - max) % max == 2^64 % max.

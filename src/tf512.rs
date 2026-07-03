@@ -1220,7 +1220,7 @@ impl Drop for Threefish512Ocb {
 }
 
 impl Threefish512Ocb {
-    /// Create a new OCB-T instance. Keying material passed on each invocation, not on
+    /// Create a new OCB instance. Keying material passed on each invocation, not on
     /// initialization.
     pub fn new() -> Self {
         Self {
